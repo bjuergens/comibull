@@ -33,7 +33,6 @@ import {
   type AiCallType,
   LANGUAGE_LABELS,
   SOURCE_LANGUAGES,
-  type SourceLanguage,
 } from '../shared-types';
 import { cacheClear, clearAll, listCallLog, storageStats, type CallLogEntry } from '../store';
 import { showError, showSuccess } from '../notifications';
@@ -176,7 +175,7 @@ export default function SettingsPage() {
               label="Standard-Sprache für neue Comics"
               data={SOURCE_LANGUAGES.map(l => ({ value: l, label: LANGUAGE_LABELS[l].de }))}
               value={settings.defaultLanguage}
-              onChange={(v) => { if (v === 'fr' || v === 'ja') setSetting('defaultLanguage', v as SourceLanguage); }}
+              onChange={(v) => { if (v === 'fr' || v === 'ja') setSetting('defaultLanguage', v); }}
             />
             <Switch
               label="Textboxen im Leser bearbeitbar"
@@ -270,7 +269,7 @@ export default function SettingsPage() {
         </section>
 
         <Text size="xs" c="dimmed" ta="center">
-          LexiBulle — Build {import.meta.env.VITE_BUILD_TIME ?? 'dev'}
+          ComiBulle — Build {import.meta.env.VITE_BUILD_TIME ?? 'dev'}
         </Text>
       </Stack>
     </Container>

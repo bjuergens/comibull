@@ -1,4 +1,4 @@
-# _lib.sh — shared helpers for lexibulle shell scripts.
+# _lib.sh — shared helpers for comibull shell scripts.
 # Source this file, don't execute it: source "$(dirname "$0")/_lib.sh"
 
 [[ -n "${_LIB_SOURCED:-}" ]] && return

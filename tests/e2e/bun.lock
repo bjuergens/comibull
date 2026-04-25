@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "lexibulle-e2e",
+      "name": "comibull-e2e",
       "devDependencies": {
         "@playwright/test": "1.56.1",
       },

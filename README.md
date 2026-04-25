@@ -1,4 +1,4 @@
-# LexiBulle
+# ComiBulle
 
 A single-user, client-only web app that helps German speakers learning French (and Japanese) practice reading with comics. Upload pages → Anthropic detects bubbles + OCRs + analyzes → read with per-bubble vocabulary, grammar notes, and translations.
 
@@ -8,7 +8,7 @@ Everything stays in your browser. You bring your own Anthropic API key.
 
 | What | URL |
 |------|-----|
-| **GitHub repo** | https://github.com/bjuergens/lexibulle |
+| **GitHub repo** | https://github.com/bjuergens/comibull |
 | **Example comic** (Pepper&Carrot) | https://www.peppercarrot.com/fr/webcomics/peppercarrot.html |
 
 ## Stack
@@ -32,8 +32,8 @@ Produces a static `dist/`. CI deploys to GitHub Pages on every push to `main` an
 
 | Branch | URL |
 |--------|-----|
-| `main` | https://bjuergens.github.io/lexibulle/branch/main/ |
-| any other branch | https://bjuergens.github.io/lexibulle/branch/&lt;branch&gt;/ |
+| `main` | https://bjuergens.github.io/comibull/branch/main/ |
+| any other branch | https://bjuergens.github.io/comibull/branch/&lt;branch&gt;/ |
 | repo root | redirects to `/branch/main/` |
 
 To run a custom-base-path build locally: `VITE_BASE_PATH=/some/path/ bun run build`.

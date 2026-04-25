@@ -22,7 +22,6 @@ import {
   type SourceLanguage,
   SYSTEM_PROMPT,
   TARGET_LANGUAGE_NAME,
-  type Bbox,
   type CallTypeConfig,
   type Region,
   type AiCallType,
@@ -237,7 +236,7 @@ export async function detectPage(
     regions: { bbox: [number, number, number, number]; ocr_text: string; type: Region['type'] }[];
   };
   return out.regions.map(r => ({
-    bbox: r.bbox as Bbox,
+    bbox: r.bbox,
     ocr_text: r.ocr_text,
     type: r.type,
     source: 'anthropic',
@@ -270,7 +269,7 @@ export async function analyzeRegions(
     const a = out.analyses.find(x => x.region_index === i);
     if (!a) return r;
     const { region_index: _ri, ...analysis } = a;
-    return { ...r, analysis: analysis as RegionAnalysis };
+    return { ...r, analysis: analysis };
   });
 }
 

@@ -2,7 +2,7 @@
 
 ## Project
 
-LexiBulle is a single-user, client-only React web app. Users upload comic pages, paste their own Anthropic API key, and get AI-powered text detection + linguistic analysis for language learners. No backend, no database, no server-side accounts — everything lives in the browser.
+ComiBulle is a single-user, client-only React web app. Users upload comic pages, paste their own Anthropic API key, and get AI-powered text detection + linguistic analysis for language learners. No backend, no database, no server-side accounts — everything lives in the browser.
 
 **Target audience: one user per browser profile.** No multi-user concerns until that ever changes.
 
@@ -43,7 +43,7 @@ Use consistently in code, commits, and logging.
 - **AI**: Anthropic Messages API called directly from the browser (`anthropic-dangerous-direct-browser-access: true`). User brings their own key.
 - **Testing**: Vitest (unit), ESLint, TypeScript
 - **Build tools**: bun
-- **Hosting**: static `dist/` deployed to GitHub Pages under `/lexibulle/branch/<branch>/`. Pushes to `main` land at `/branch/main/` (canonical app URL); same-repo PRs land at `/branch/<head_ref>/` for previews. The repo root (`/lexibulle/`) is a meta-refresh redirect to `/branch/main/`. Fork PRs skip deploy (no write token).
+- **Hosting**: static `dist/` deployed to GitHub Pages under `/comibull/branch/<branch>/`. Pushes to `main` land at `/branch/main/` (canonical app URL); same-repo PRs land at `/branch/<head_ref>/` for previews. The repo root (`/comibull/`) is a meta-refresh redirect to `/branch/main/`. Fork PRs skip deploy (no write token).
 
 ## Architecture
 
