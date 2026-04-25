@@ -6,7 +6,7 @@ import react from "@vitejs/plugin-react";
 const buildTime = process.env.VITE_BUILD_TIME ?? new Date().toISOString();
 
 // VITE_BASE_PATH: subpath we're served from. GitHub Pages deploys land under
-// /lexibulle/branch/<branch>/; local dev runs at /. Always trailing-slashed.
+// /comibull/branch/<branch>/; local dev runs at /. Always trailing-slashed.
 const basePath = process.env.VITE_BASE_PATH ?? "/";
 
 export default defineConfig({

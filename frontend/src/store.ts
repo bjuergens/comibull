@@ -63,7 +63,7 @@ interface Schema extends DBSchema {
   aiCallLog: { key: number; value: CallLogEntry };
 }
 
-const DB_NAME = 'lexibulle';
+const DB_NAME = 'comibull';
 const DB_VERSION = 1;
 const CALL_LOG_MAX = 500;
 
@@ -262,7 +262,7 @@ export async function cacheClear(): Promise<void> {
 
 export async function logCall(entry: Omit<CallLogEntry, 'id'>): Promise<void> {
   const d = await db();
-  await d.add('aiCallLog', entry as CallLogEntry);
+  await d.add('aiCallLog', entry);
   const count = await d.count('aiCallLog');
   if (count > CALL_LOG_MAX) {
     // Drop oldest rows (lowest auto-ids).

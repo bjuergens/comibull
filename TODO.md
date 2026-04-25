@@ -63,7 +63,7 @@ the client-only product:
 ## Deploy
 
 - Hosted on GitHub Pages from the `gh-pages` branch (created by the
-  first CI run). Each branch lives at `/lexibulle/branch/<branch>/`;
+  first CI run). Each branch lives at `/comibull/branch/<branch>/`;
   the repo root redirects to `/branch/main/`. Workflow:
   `.github/workflows/ci.yml`.
 - One-time repo settings: enable GitHub Pages with source `gh-pages`

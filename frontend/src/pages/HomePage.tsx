@@ -15,7 +15,7 @@ export default function HomePage() {
     <Container size="sm" pt="md">
       <Stack gap="lg">
         <Stack align="center" gap={4}>
-          <Title order={2}>LexiBulle</Title>
+          <Title order={2}>ComiBulle</Title>
           <Text c="dimmed" ta="center">
             Lerne Sprachen, indem du Comics liest. Alles läuft lokal im Browser — dein
             Anthropic-API-Schlüssel und deine Comics verlassen dieses Gerät nicht.

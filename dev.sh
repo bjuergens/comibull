@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local dev server for the LexiBulle SPA. No backend, no database — just Vite.
+# Local dev server for the ComiBulle SPA. No backend, no database — just Vite.
 #
 # Usage:
 #   ./dev.sh              # start Vite on http://localhost:3000

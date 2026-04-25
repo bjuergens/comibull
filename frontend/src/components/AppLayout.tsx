@@ -57,7 +57,7 @@ export default function AppLayout() {
               fw={700}
               style={{ whiteSpace: 'nowrap', textDecoration: 'none' }}
             >
-              LexiBulle
+              ComiBulle
             </Anchor>
             <Text size="sm" c="dimmed">/</Text>
             <Anchor

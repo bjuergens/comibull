@@ -7,7 +7,7 @@ test.beforeEach(async ({ page }) => {
 
 test('home page renders and prompts for API key when none is set', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'LexiBulle' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'ComiBulle' })).toBeVisible();
   // No key yet → yellow "kein API-Schlüssel" alert is shown.
   await expect(page.getByText(/kein API-Schlüssel/i)).toBeVisible();
 });
