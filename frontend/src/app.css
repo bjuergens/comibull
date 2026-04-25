@@ -1,0 +1,12 @@
+/* Reader (PageImageWithOverlay) region colors — kept for the overlay component */
+:root {
+  --reader-detected-fill: rgba(255, 165, 0, 0.3);
+  --reader-detected-stroke: rgba(255, 165, 0, 0.8);
+  --reader-analyzed-fill: rgba(74, 144, 226, 0.35);
+  --reader-analyzed-stroke: rgba(74, 144, 226, 0.8);
+  --reader-selected-fill: transparent;
+  --reader-selected-stroke: #4a90e2;
+  --reader-notext-fill: rgba(160, 160, 160, 0.3);
+  --reader-notext-stroke: rgba(160, 160, 160, 0.8);
+  --reader-bg-status-badge: rgba(255, 255, 255, 0.9);
+}

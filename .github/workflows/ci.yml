@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - ".claude/**"
+      - "LICENSE"
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - "**.md"
+      - ".claude/**"
+      - "LICENSE"
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-frontend:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - run: ./check.sh
+
+  e2e:
+    needs: check-frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - name: Install frontend deps
+        run: bun install --silent
+        working-directory: frontend
+      - name: Install e2e deps
+        run: bun install --silent
+        working-directory: tests/e2e
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('tests/e2e/package.json') }}
+      - name: Install Playwright Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: bunx playwright install --with-deps chromium
+        working-directory: tests/e2e
+      - name: Run Playwright
+        run: bunx playwright test --reporter=list
+        working-directory: tests/e2e
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: playwright-report
+          path: tests/e2e/test-results/
+          retention-days: 7
+
+  # Deploys to GitHub Pages under /lexibulle/branch/<branch>/.
+  # PRs deploy to /branch/<head_ref>/, pushes to main deploy to /branch/main/.
+  # The root /lexibulle/ index.html redirects to /branch/main/.
+  # Fork PRs can't push to gh-pages with the read-only GITHUB_TOKEN they get,
+  # so skip the deploy job for them — they still get CI signal.
+  deploy:
+    needs: e2e
+    if: |
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: gh-pages
+      cancel-in-progress: false
+    env:
+      BRANCH_NAME: ${{ github.event_name == 'pull_request' && github.head_ref || 'main' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - name: Install
+        run: bun install --silent
+        working-directory: frontend
+      - name: Build
+        env:
+          VITE_BASE_PATH: /lexibulle/branch/${{ env.BRANCH_NAME }}/
+          VITE_BUILD_TIME: ${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at }}
+        run: bun run build
+        working-directory: frontend
+      - name: SPA fallback (404.html)
+        run: cp frontend/dist/index.html frontend/dist/404.html
+      - name: Deploy branch build
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./frontend/dist
+          destination_dir: branch/${{ env.BRANCH_NAME }}
+          keep_files: true
+          commit_message: "🚀 deploy ${{ env.BRANCH_NAME }} (${{ github.sha }})"
+      - name: Stage root redirect
+        run: |
+          mkdir -p gh-pages-root
+          cat > gh-pages-root/index.html <<'EOF'
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8" />
+              <title>LexiBulle</title>
+              <meta http-equiv="refresh" content="0; url=./branch/main/" />
+              <link rel="canonical" href="./branch/main/" />
+            </head>
+            <body>
+              <p>Redirecting to <a href="./branch/main/">LexiBulle</a>…</p>
+            </body>
+          </html>
+          EOF
+      - name: Deploy root redirect
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./gh-pages-root
+          keep_files: true
+          commit_message: "🚀 update root redirect"

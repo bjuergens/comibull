@@ -1,0 +1,6 @@
+.translationBlurred {
+  filter: blur(4px);
+  cursor: pointer;
+  user-select: none;
+  transition: filter 0.2s ease;
+}

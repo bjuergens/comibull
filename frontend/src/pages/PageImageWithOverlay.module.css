@@ -1,0 +1,164 @@
+/* Panzoom viewport — fills the parent (which must have position: relative) */
+.imageWrapper {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  padding: 1rem;
+}
+
+/* Shrink-wraps to the rendered image so text overlay aligns exactly.
+   Panzoom applies CSS transforms to this element. */
+.imageInner {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+}
+
+/* No max-width/max-height — image renders at natural size, panzoom
+   handles fitting via scale transforms. */
+.pageImage {
+  border-radius: 4px;
+  user-select: none;
+  display: block;
+}
+
+/* Text overlay container — covers the image exactly */
+.textOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Individual text box — absolutely positioned within the overlay using % */
+.textBox {
+  position: absolute;
+  pointer-events: all;
+  user-select: text;
+  cursor: pointer;
+  overflow: hidden;
+  border: 1.5px solid transparent;
+  border-radius: 3px;
+  transition: border-color 0.15s, background-color 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.textBoxDetected {
+  border-color: var(--reader-detected-stroke);
+  background: var(--reader-detected-fill);
+}
+
+.textBoxAnalyzed {
+  border-color: var(--reader-analyzed-stroke);
+  background: var(--reader-analyzed-fill);
+}
+
+.textBoxNoText {
+  border-color: var(--reader-notext-stroke);
+  background: var(--reader-notext-fill);
+}
+
+.textBox.textBoxSelected {
+  border-color: var(--reader-selected-stroke);
+  background: var(--reader-selected-fill);
+}
+
+.textBox:hover {
+  background: rgba(255, 255, 255, 0.85);
+  border-color: var(--color-primary);
+}
+
+.textBox:hover .textBoxText {
+  visibility: visible;
+  color: var(--color-text);
+}
+
+.textBox.textBoxSelected .textBoxText {
+  visibility: hidden;
+}
+
+/* Keep selected region transparent even on hover so the original bubble stays readable */
+.textBox.textBoxSelected:hover {
+  background: transparent;
+  border-color: var(--reader-selected-stroke);
+}
+
+.textBox.textBoxSelected:hover .textBoxText {
+  visibility: hidden;
+}
+
+/* OCR / translation text inside the box — hidden until hover/select */
+.textBoxText {
+  visibility: hidden;
+  font-size: 0.7rem;
+  line-height: 1.2;
+  padding: 2px;
+  text-align: center;
+  word-break: break-word;
+  pointer-events: none;
+}
+
+.textBoxEditable {
+  cursor: move;
+}
+
+/* Resize handles — small squares at box corners */
+.resizeHandle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  transform: translate(-50%, -50%);
+  background: var(--color-primary);
+  border: 1px solid white;
+  border-radius: 1px;
+  pointer-events: all;
+  z-index: 20;
+}
+
+/* Zoom controls overlay — visible wrapper so buttons stand out over comic art */
+.zoomControls {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 15;
+  display: flex;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 6px;
+  padding: 3px;
+  border: 1px solid var(--color-border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.zoomControls button {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s;
+}
+
+.zoomControls button:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.statusBadge {
+  position: absolute;
+  top: 1.25rem;
+  right: 1.25rem;
+  background: var(--reader-bg-status-badge);
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  border: 1px solid var(--color-border);
+}
