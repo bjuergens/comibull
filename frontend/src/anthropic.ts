@@ -137,7 +137,6 @@ async function callClaude(args: CallArgs): Promise<{ parsed: unknown; tokens: { 
   const body = {
     model: args.config.model,
     max_tokens: args.config.max_tokens,
-    temperature: args.config.temperature,
     system: args.system,
     messages: [{ role: 'user', content }],
     tools: [{

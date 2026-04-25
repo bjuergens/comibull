@@ -59,7 +59,6 @@ describe('anthropic.ts caching', () => {
     mocks.readApiKey.mockReturnValue('sk-test');
     mocks.readModelConfig.mockReturnValue({
       model: 'claude-haiku-4-5-20251001',
-      temperature: 0,
       max_tokens: 1024,
     });
 

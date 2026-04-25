@@ -55,7 +55,6 @@ export type AiCallType = 'detect' | 'analyze';
 
 export interface CallTypeConfig {
   model: string;
-  temperature: number;
   max_tokens: number;
 }
 
@@ -71,8 +70,8 @@ export const ALLOWED_AI_MODELS: { id: string; label: string }[] = [
 // step (more accurate at finding small bubbles), Haiku for the cheap text-only
 // analysis step.
 export const DEFAULT_AI_CONFIG: Record<AiCallType, CallTypeConfig> = {
-  detect: { model: 'claude-sonnet-4-6', temperature: 0.0, max_tokens: 4096 },
-  analyze: { model: 'claude-haiku-4-5-20251001', temperature: 0.0, max_tokens: 4096 },
+  detect: { model: 'claude-sonnet-4-6', max_tokens: 4096 },
+  analyze: { model: 'claude-haiku-4-5-20251001', max_tokens: 4096 },
 };
 
 // ─── Prompts (ported from backend/app/prompts/*.txt) ────────────────────────
@@ -88,7 +87,7 @@ export const DETECT_PROMPT = (lang: string) =>
   `You are looking at a ${lang} comic book page. Find every text region (speech/thought bubbles, narration boxes, sound effects) and for each one return a normalized bounding box and the transcribed text.
 
 For each region:
-- bbox: [x1, y1, x2, y2] in normalized 0–1 page coordinates (top-left origin). Tight box around the text, small padding is fine.
+- bbox: [x1, y1, x2, y2] in normalized 0–1 page coordinates (top-left origin). The box should cover the entire visible container (the bubble outline, caption box border, or sfx lettering extent) — not just the text characters inside. Include the full tail of speech bubbles. Be as precise as possible: measure carefully, then double-check each coordinate against the image before returning.
 - ocr_text: exact text as written. Text is usually hand-lettered and uppercase — watch for characters that look similar (S/J, E/L, A/H). Preserve line breaks with "\\n". If multiple separate text blocks are inside one bubble, join with "\\n----\\n".
 - type: "dialogue" (speech/thought bubbles with tails), "narration" (rectangular caption boxes), "sfx" (loose stylized sound-effect text), or "other".
 
