@@ -165,28 +165,23 @@ async function callClaude<S extends Type>(args: CallArgs<S>): Promise<{
   };
 
   // Hash input (minus the API key, which lives in headers) for content-addressed caching.
+  // Schema is part of `body` (input_schema), so a schema change naturally invalidates
+  // existing entries — no separate re-validation needed on hit.
   const call_hash = await sha256Hex(JSON.stringify(body));
   const hit = await cacheLookup(call_hash);
   if (hit) {
-    // Validate the cached payload against the current schema. If it doesn't
-    // match (schema changed, prior bug, manual DB edit) we silently fall
-    // through to a fresh API call rather than handing junk to the caller.
-    const cached = args.schema(hit.response_json);
-    if (!(cached instanceof type.errors)) {
-      // Log the would-have-been tokens so Settings can show "tokens saved".
-      // cache_hit=true marks this row as savings, not real spend.
-      await logCall({
-        call_type: args.call_type,
-        model: args.config.model,
-        input_tokens: hit.input_tokens,
-        output_tokens: hit.output_tokens,
-        cache_hit: true,
-        page_id: args.page_id,
-        created_at: new Date().toISOString(),
-      });
-      return { parsed: cached, tokens: { input: 0, output: 0 }, cache_hit: true };
-    }
-    console.warn('⚠️ cached AI response no longer matches schema, re-fetching:', cached.summary);
+    // Log the would-have-been tokens so Settings can show "tokens saved".
+    // cache_hit=true marks this row as savings, not real spend.
+    await logCall({
+      call_type: args.call_type,
+      model: args.config.model,
+      input_tokens: hit.input_tokens,
+      output_tokens: hit.output_tokens,
+      cache_hit: true,
+      page_id: args.page_id,
+      created_at: new Date().toISOString(),
+    });
+    return { parsed: hit.response_json as S['infer'], tokens: { input: 0, output: 0 }, cache_hit: true };
   }
 
   const res = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {

@@ -156,22 +156,4 @@ describe('anthropic.ts caching', () => {
     expect(mocks.cacheStore).not.toHaveBeenCalled();
   });
 
-  it('treats a cached payload that no longer matches the schema as a miss', async () => {
-    // Schema drift safety net: stale cache entries don't poison new responses.
-    mocks.cacheLookup.mockResolvedValue({
-      call_hash: 'whatever',
-      call_type: 'analyze',
-      response_json: { analyses: [{ region_index: 0, difficulty: 'A1', vocabulary: [], grammar_notes: [], translation: 'old' /* missing cultural_notes */ }] },
-      input_tokens: 1,
-      output_tokens: 1,
-      created_at: '2026-04-24T00:00:00Z',
-    });
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
-      new Response(JSON.stringify(ANALYZE_RESPONSE), { status: 200 }),
-    );
-
-    const out = await analyzeRegions([sampleRegion], 'fr');
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-    expect(out[0]?.analysis?.translation).toBe('hello');
-  });
 });

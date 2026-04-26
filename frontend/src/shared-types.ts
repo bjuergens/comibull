@@ -62,12 +62,10 @@ export type PageStatus = typeof pageStatusSchema.infer;
 
 // Stored in localStorage. Only account-global preferences belong here;
 // per-browser UI toggles (debugMode, collapsed panels) live in their own keys.
-// '+': 'delete' silently strips unknown keys so an old localStorage entry from a
-// previous app version doesn't poison the in-memory settings.
 export const userSettingsSchema = type({
   canEditTextboxes: 'boolean',
   defaultLanguage: sourceLanguageSchema,
-  '+': 'delete',
+  '+': 'reject',
 });
 export type UserSettings = typeof userSettingsSchema.infer;
 
@@ -82,7 +80,7 @@ export type AiCallType = typeof aiCallTypeSchema.infer;
 export const callTypeConfigSchema = type({
   model: 'string',
   max_tokens: 'number.integer > 0',
-  '+': 'delete',
+  '+': 'reject',
 });
 export type CallTypeConfig = typeof callTypeConfigSchema.infer;
 
@@ -90,7 +88,7 @@ export type CallTypeConfig = typeof callTypeConfigSchema.infer;
 export const modelConfigMapSchema = type({
   'detect?': callTypeConfigSchema,
   'analyze?': callTypeConfigSchema,
-  '+': 'delete',
+  '+': 'reject',
 });
 
 export const ALLOWED_AI_MODELS: { id: string; label: string }[] = [
@@ -164,10 +162,23 @@ export const detectResponseSchema = type({
 });
 
 // Analyze returns one entry per region with a region_index pointing back at the
-// input order. The rest of each entry matches RegionAnalysis exactly.
+// input order. The rest of each entry matches RegionAnalysis exactly. We re-list
+// the fields rather than .merge()'ing because arktype's merge drops the source
+// type's '+': 'reject' rule, silently allowing extras.
 export const analyzeResponseSchema = type({
-  analyses: regionAnalysisSchema.merge({
+  analyses: type({
     region_index: 'number.integer >= 0',
+    vocabulary: type({
+      source: 'string',
+      target: 'string',
+      notes: 'string',
+      '+': 'reject',
+    }).array(),
+    grammar_notes: 'string[]',
+    translation: 'string',
+    difficulty: cefrLevelSchema,
+    cultural_notes: 'string',
+    '+': 'reject',
   }).array(),
   '+': 'reject',
 });
