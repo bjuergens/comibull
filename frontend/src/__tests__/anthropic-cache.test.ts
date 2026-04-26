@@ -95,7 +95,7 @@ describe('anthropic.ts caching', () => {
     expect(out[0]?.analysis?.translation).toBe('hello');
   });
 
-  it('cache hit: skips the API and returns the cached payload', async () => {
+  it('cache hit: skips the API and logs the saved tokens', async () => {
     mocks.cacheLookup.mockResolvedValue({
       call_hash: 'whatever',
       call_type: 'analyze',
@@ -109,11 +109,12 @@ describe('anthropic.ts caching', () => {
 
     expect(globalThis.fetch).not.toHaveBeenCalled();
     expect(mocks.cacheStore).not.toHaveBeenCalled();
+    // Cache hits log the would-have-been tokens so Settings can show savings.
+    // cache_hit=true marks them as savings rather than real spend.
     expect(mocks.logCall).toHaveBeenCalledWith(expect.objectContaining({
       cache_hit: true,
-      // Cache hits don't count tokens against the user — the call didn't happen.
-      input_tokens: 0,
-      output_tokens: 0,
+      input_tokens: 99,
+      output_tokens: 99,
     }));
     expect(out[0]?.analysis?.translation).toBe('hello');
   });

@@ -1,8 +1,7 @@
-// Thin IndexedDB wrapper built on `idb`. Replaces the Postgres schema for
-// comics/pages/ai_call_cache/ai_call_log. One database, four stores:
+// Thin IndexedDB wrapper built on `idb`. One database, four stores:
 //
 //   comics:      ComicRow keyed by id
-//   pages:       PageRow keyed by id, indexed by comic_id + page_number
+//   pages:       PageRow keyed by id
 //   aiCache:     CacheEntry keyed by call_hash (content-addressed responses)
 //   aiCallLog:   CallLogEntry keyed by auto-id — ring buffer trimmed in code
 
@@ -54,17 +53,17 @@ export interface CallLogEntry {
 
 interface Schema extends DBSchema {
   comics: { key: number; value: ComicRow };
-  pages: {
-    key: number;
-    value: PageRow;
-    indexes: { by_comic: [number, number] };
-  };
+  pages: { key: number; value: PageRow };
   aiCache: { key: string; value: CacheEntry };
   aiCallLog: { key: number; value: CallLogEntry };
 }
 
 const DB_NAME = 'comibull';
-const DB_VERSION = 1;
+// Aggressive prototype migration: bumping this nukes every store and starts
+// fresh. Acceptable because the only data here is uploaded comics and an
+// AI-response cache — no user accounts, no anything irreplaceable. The API
+// key lives in localStorage, so it survives.
+const DB_VERSION = 2;
 const CALL_LOG_MAX = 500;
 
 let dbPromise: Promise<IDBPDatabase<Schema>> | null = null;
@@ -72,10 +71,15 @@ let dbPromise: Promise<IDBPDatabase<Schema>> | null = null;
 export function db(): Promise<IDBPDatabase<Schema>> {
   if (dbPromise === null) {
     dbPromise = openDB<Schema>(DB_NAME, DB_VERSION, {
-      upgrade(db) {
+      upgrade(db, oldVersion) {
+        if (oldVersion > 0) {
+          console.warn(`⚠️ comibull: schema upgrade from v${oldVersion} to v${DB_VERSION} — wiping IndexedDB.`);
+          for (const name of Array.from(db.objectStoreNames)) {
+            db.deleteObjectStore(name);
+          }
+        }
         db.createObjectStore('comics', { keyPath: 'id' });
-        const pages = db.createObjectStore('pages', { keyPath: 'id' });
-        pages.createIndex('by_comic', ['comic_id', 'page_number']);
+        db.createObjectStore('pages', { keyPath: 'id' });
         db.createObjectStore('aiCache', { keyPath: 'call_hash' });
         db.createObjectStore('aiCallLog', { keyPath: 'id', autoIncrement: true });
       },

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ActionIcon,
-  Anchor,
   Badge,
   Button,
   Container,
@@ -167,7 +166,6 @@ export default function ComicEditPage() {
         <Table striped highlightOnHover mb="md">
           <Table.Thead>
             <Table.Tr>
-              <Table.Th>#</Table.Th>
               <Table.Th>Bereiche</Table.Th>
               <Table.Th>Status</Table.Th>
               <Table.Th>Vorschau</Table.Th>
@@ -177,14 +175,6 @@ export default function ComicEditPage() {
           <Table.Tbody>
             {comic.pages.map((page, idx) => (
               <Table.Tr key={page.id}>
-                <Table.Td>
-                  <Anchor
-                    href={`/comics/${id}?page=${idx + 1}`}
-                    onClick={(e) => { e.preventDefault(); void navigate(`/comics/${id}?page=${idx + 1}`); }}
-                  >
-                    {page.page_number}
-                  </Anchor>
-                </Table.Td>
                 <Table.Td>{page.regions ? `${page.regions.length} Box${page.regions.length !== 1 ? 'en' : ''}` : '—'}</Table.Td>
                 <Table.Td>{(() => {
                   const b = pageBadge(page);
@@ -200,6 +190,13 @@ export default function ComicEditPage() {
                 </Table.Td>
                 <Table.Td>
                   <Group gap={4}>
+                    <Button
+                      variant="subtle"
+                      size="compact-xs"
+                      onClick={() => void navigate(`/comics/${id}?page=${idx + 1}`)}
+                    >
+                      Öffnen
+                    </Button>
                     <ActionIcon
                       variant="subtle"
                       size="sm"
