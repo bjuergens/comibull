@@ -168,10 +168,12 @@ export async function addPages(comic_id: number, images: Blob[]): Promise<void> 
   const comic = await d.get('comics', comic_id);
   if (!comic) throw new Error(`comic ${comic_id} not found`);
 
-  // page_numbers are always 1..N contiguous (deletePage renumbers, reorderPages
-  // re-assigns in display order), so the next page_number is just the current
-  // count + 1.
-  const firstPageNumber = comic.page_ids.length + 1;
+  // page_number is just a label. Gaps from deletes are fine — we never renumber.
+  let maxNum = 0;
+  for (const pid of comic.page_ids) {
+    const p = await d.get('pages', pid);
+    if (p && p.page_number > maxNum) maxNum = p.page_number;
+  }
   const firstId = await nextId('pages');
   const newIds = images.map((_, i) => firstId + i);
 
@@ -180,7 +182,7 @@ export async function addPages(comic_id: number, images: Blob[]): Promise<void> 
     await tx.objectStore('pages').add({
       id: newIds[i]!,
       comic_id,
-      page_number: firstPageNumber + i,
+      page_number: maxNum + 1 + i,
       image: images[i]!,
       regions: null,
       status: 'idle',
@@ -204,40 +206,21 @@ export async function deletePage(comic_id: number, page_id: number): Promise<voi
   if (!comic) return;
   const tx = d.transaction(['comics', 'pages'], 'readwrite');
   await tx.objectStore('pages').delete(page_id);
-  const updatedComic: ComicRow = {
+  await tx.objectStore('comics').put({
     ...comic,
     page_ids: comic.page_ids.filter(id => id !== page_id),
-  };
-  // Re-number remaining pages so there are no gaps (matches backend behaviour).
-  const remaining: PageRow[] = [];
-  for (const pid of updatedComic.page_ids) {
-    const p = await tx.objectStore('pages').get(pid);
-    if (p) remaining.push(p);
-  }
-  remaining.sort((a, b) => a.page_number - b.page_number);
-  for (let i = 0; i < remaining.length; i++) {
-    const p = remaining[i]!;
-    if (p.page_number !== i + 1) {
-      await tx.objectStore('pages').put({ ...p, page_number: i + 1 });
-    }
-  }
-  await tx.objectStore('comics').put(updatedComic);
+  });
   await tx.done;
 }
 
-export async function reorderPages(comic_id: number, ordered_page_ids: number[]): Promise<void> {
+export async function swapPagePositions(comic_id: number, page_id_a: number, page_id_b: number): Promise<void> {
   const d = await db();
-  const tx = d.transaction(['comics', 'pages'], 'readwrite');
-  for (let i = 0; i < ordered_page_ids.length; i++) {
-    const pid = ordered_page_ids[i]!;
-    const p = await tx.objectStore('pages').get(pid);
-    if (!p) continue;
-    await tx.objectStore('pages').put({ ...p, page_number: i + 1 });
-  }
-  const comic = await tx.objectStore('comics').get(comic_id);
-  if (comic) {
-    await tx.objectStore('comics').put({ ...comic, page_ids: ordered_page_ids });
-  }
+  const tx = d.transaction('pages', 'readwrite');
+  const a = await tx.store.get(page_id_a);
+  const b = await tx.store.get(page_id_b);
+  if (!a || !b || a.comic_id !== comic_id || b.comic_id !== comic_id) { await tx.done; return; }
+  await tx.store.put({ ...a, page_number: b.page_number });
+  await tx.store.put({ ...b, page_number: a.page_number });
   await tx.done;
 }
 

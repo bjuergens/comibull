@@ -23,7 +23,7 @@ import {
   deletePage,
   getComic,
   listPages,
-  reorderPages,
+  swapPagePositions,
   updateComic,
   type ComicRow,
   type PageRow,
@@ -122,12 +122,9 @@ export default function ComicEditPage() {
     const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
     if (swapIdx < 0 || swapIdx >= pages.length) return;
 
-    const order = pages.map(p => p.id);
-    [order[idx], order[swapIdx]] = [order[swapIdx]!, order[idx]!];
-
     setReordering(true);
     try {
-      await reorderPages(idNum, order);
+      await swapPagePositions(idNum, pageId, pages[swapIdx]!.id);
       await fetchComic();
     } finally {
       setReordering(false);
@@ -182,8 +179,8 @@ export default function ComicEditPage() {
               <Table.Tr key={page.id}>
                 <Table.Td>
                   <Anchor
-                    href={`/comics/${id}?page=${page.page_number}`}
-                    onClick={(e) => { e.preventDefault(); void navigate(`/comics/${id}?page=${page.page_number}`); }}
+                    href={`/comics/${id}?page=${idx + 1}`}
+                    onClick={(e) => { e.preventDefault(); void navigate(`/comics/${id}?page=${idx + 1}`); }}
                   >
                     {page.page_number}
                   </Anchor>
