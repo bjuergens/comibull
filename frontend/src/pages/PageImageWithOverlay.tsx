@@ -253,7 +253,7 @@ export function PageImageWithOverlay({
           key={page.image_url}
           ref={imgRef}
           src={page.image_url}
-          alt={`Seite ${page.page_number}`}
+          alt={`Seite ${page.display_order}`}
           className={styles.pageImage}
           draggable={false}
           onLoad={onImageLoad}

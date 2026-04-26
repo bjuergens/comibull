@@ -67,19 +67,7 @@ export async function mockAnthropic(page: Page, opts: MockOptions = {}): Promise
 
     let toolInput: unknown;
     if (hasImage) {
-      toolInput = {
-        regions: detectRegions,
-        vision_context: {
-          context: 'Test scene.',
-          estimated_box_count: detectRegions.length,
-          text_density: 'low',
-          font_styles: ['handwritten'],
-          contrast: 'high',
-          box_types: { dialogue: detectRegions.length },
-          mood: 'neutral',
-          narrative_notes: '',
-        },
-      };
+      toolInput = { regions: detectRegions };
     } else {
       toolInput = {
         analyses: detectRegions.map((_, i) => ({

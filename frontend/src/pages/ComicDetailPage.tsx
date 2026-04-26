@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Container, Group, Button, Text, Loader, Paper, ActionIcon, Menu } from '@mantine/core';
-import { useLocalStorage, useMediaQuery } from '@mantine/hooks';
+import { useMediaQuery } from '@mantine/hooks';
 import { useSettings } from '../SettingsContext';
+import { readDebugMode } from '../user-settings';
 import { useComicBreadcrumbs } from './useComicBreadcrumbs';
 import { usePageOperations } from './usePageOperations';
 import { PageImageWithOverlay } from './PageImageWithOverlay';
@@ -122,7 +123,7 @@ export default function ComicDetailPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { settings, setSetting } = useSettings();
-  const [debugMode] = useLocalStorage<boolean>({ key: 'debug_mode', defaultValue: false });
+  const [debugMode] = useState(() => readDebugMode());
   const initialPage = Math.max(0, parseInt(searchParams.get('page') ?? '1', 10) - 1);
   const [currentPageIdx, setCurrentPageIdx] = useState(initialPage);
   const [selectedRegionIdx, setSelectedRegionIdx] = useState<number | null>(null);

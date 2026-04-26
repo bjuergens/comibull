@@ -4,6 +4,7 @@ import { Container, Title, Table, Button, Group, Text, Loader, Anchor, Badge, St
 import { useLayoutContext } from '../components/AppLayout';
 import { deleteComic, listComics, listPages, type ComicRow } from '../store';
 import { LANGUAGE_LABELS } from '../shared-types';
+import { showSuccess } from '../notifications';
 
 interface ComicListItem extends ComicRow {
   page_count: number;
@@ -34,8 +35,10 @@ export default function ComicListPage() {
   useEffect(() => { void fetchComics(); }, [fetchComics]);
 
   async function handleDelete(id: number) {
+    const title = comics.find(c => c.id === id)?.title ?? '';
     await deleteComic(id);
     setComics(prev => prev.filter(c => c.id !== id));
+    showSuccess('Comic gelöscht', title);
   }
 
   if (loading) return <Container pt="xl"><Loader /></Container>;

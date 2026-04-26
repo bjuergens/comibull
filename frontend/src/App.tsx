@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { SettingsProvider } from './SettingsContext';
 import AppLayout from './components/AppLayout';
@@ -8,9 +9,26 @@ import ComicEditPage from './pages/ComicEditPage';
 import UploadPage from './pages/UploadPage';
 import SettingsPage from './pages/SettingsPage';
 import NotFoundPage from './pages/NotFoundPage';
+import { consumeMigrationNotice, db } from './store';
+import { showWarning } from './notifications';
 import './app.css';
 
 export default function App() {
+  // Boot the IndexedDB connection so the upgrade callback fires, then surface
+  // a toast if it wiped data. consumeMigrationNotice is one-shot — safe under
+  // StrictMode's double-mount.
+  useEffect(() => {
+    void db().then(() => {
+      const m = consumeMigrationNotice();
+      if (m) {
+        showWarning(
+          'Datenbank zurückgesetzt',
+          `Schema von v${m.oldVersion} auf v${m.newVersion} aktualisiert — alle Comics und der KI-Cache wurden gelöscht. Der API-Schlüssel bleibt erhalten.`,
+        );
+      }
+    });
+  }, []);
+
   return (
     <BrowserRouter basename={import.meta.env.BASE_URL}>
       <SettingsProvider>

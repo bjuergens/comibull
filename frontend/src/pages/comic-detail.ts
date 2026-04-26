@@ -9,7 +9,7 @@ export { markManuallyEdited, replaceRegionAt, REGION_TYPE_LABEL } from '../share
 
 export interface PageItem {
   id: number;
-  page_number: number;
+  display_order: number;
   image_url: string;  // object URL; lifecycle owned by page hook
   regions: Region[] | null;
   status: PageStatus;
@@ -34,7 +34,7 @@ export function buildComicDetail(comic: ComicRow, pages: PageRow[]): ComicDetail
     created_at: comic.created_at,
     pages: pages.map(row => ({
       id: row.id,
-      page_number: row.page_number,
+      display_order: row.display_order,
       image_url: URL.createObjectURL(row.image),
       regions: row.regions,
       status: row.status,

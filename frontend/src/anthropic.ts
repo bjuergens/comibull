@@ -151,11 +151,13 @@ async function callClaude(args: CallArgs): Promise<{ parsed: unknown; tokens: { 
   const call_hash = await sha256Hex(JSON.stringify(body));
   const hit = await cacheLookup(call_hash);
   if (hit) {
+    // Log the would-have-been tokens so Settings can show "tokens saved".
+    // cache_hit=true marks this row as savings, not real spend.
     await logCall({
       call_type: args.call_type,
       model: args.config.model,
-      input_tokens: 0,
-      output_tokens: 0,
+      input_tokens: hit.input_tokens,
+      output_tokens: hit.output_tokens,
       cache_hit: true,
       page_id: args.page_id,
       created_at: new Date().toISOString(),

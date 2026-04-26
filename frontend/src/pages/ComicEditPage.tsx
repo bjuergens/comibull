@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ActionIcon,
-  Anchor,
   Badge,
   Button,
   Container,
@@ -23,7 +22,7 @@ import {
   deletePage,
   getComic,
   listPages,
-  reorderPages,
+  swapPagePositions,
   updateComic,
   type ComicRow,
   type PageRow,
@@ -122,12 +121,9 @@ export default function ComicEditPage() {
     const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
     if (swapIdx < 0 || swapIdx >= pages.length) return;
 
-    const order = pages.map(p => p.id);
-    [order[idx], order[swapIdx]] = [order[swapIdx]!, order[idx]!];
-
     setReordering(true);
     try {
-      await reorderPages(idNum, order);
+      await swapPagePositions(idNum, pageId, pages[swapIdx]!.id);
       await fetchComic();
     } finally {
       setReordering(false);
@@ -170,7 +166,6 @@ export default function ComicEditPage() {
         <Table striped highlightOnHover mb="md">
           <Table.Thead>
             <Table.Tr>
-              <Table.Th>#</Table.Th>
               <Table.Th>Bereiche</Table.Th>
               <Table.Th>Status</Table.Th>
               <Table.Th>Vorschau</Table.Th>
@@ -180,14 +175,6 @@ export default function ComicEditPage() {
           <Table.Tbody>
             {comic.pages.map((page, idx) => (
               <Table.Tr key={page.id}>
-                <Table.Td>
-                  <Anchor
-                    href={`/comics/${id}?page=${page.page_number}`}
-                    onClick={(e) => { e.preventDefault(); void navigate(`/comics/${id}?page=${page.page_number}`); }}
-                  >
-                    {page.page_number}
-                  </Anchor>
-                </Table.Td>
                 <Table.Td>{page.regions ? `${page.regions.length} Box${page.regions.length !== 1 ? 'en' : ''}` : '—'}</Table.Td>
                 <Table.Td>{(() => {
                   const b = pageBadge(page);
@@ -203,6 +190,13 @@ export default function ComicEditPage() {
                 </Table.Td>
                 <Table.Td>
                   <Group gap={4}>
+                    <Button
+                      variant="subtle"
+                      size="compact-xs"
+                      onClick={() => void navigate(`/comics/${id}?page=${idx + 1}`)}
+                    >
+                      Öffnen
+                    </Button>
                     <ActionIcon
                       variant="subtle"
                       size="sm"
@@ -267,7 +261,7 @@ export default function ComicEditPage() {
       >
         {deleteTarget && (
           <Stack>
-            <Text>Möchtest du Seite {deleteTarget.page_number} wirklich löschen?</Text>
+            <Text>Möchtest du diese Seite wirklich löschen?</Text>
             <Text c="red" size="sm">Die Seite und alle Analysen werden unwiderruflich entfernt.</Text>
             <Group justify="flex-end">
               <Button variant="default" onClick={() => setDeleteTarget(null)}>Abbrechen</Button>

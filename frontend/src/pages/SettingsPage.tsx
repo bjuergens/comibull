@@ -69,16 +69,20 @@ export default function SettingsPage() {
 
   const [stats, setStats] = useState<{ comics: number; pages: number; cache: number; logs: number; bytes: number } | null>(null);
   const [log, setLog] = useState<CallLogEntry[]>([]);
-  const [tokenTotal, setTokenTotal] = useState({ input: 0, output: 0 });
+  const [tokenTotal, setTokenTotal] = useState({
+    spentInput: 0, spentOutput: 0, savedInput: 0, savedOutput: 0,
+  });
 
   const refreshDiag = useCallback(async () => {
     const [s, l] = await Promise.all([storageStats(), listCallLog(100)]);
     setStats(s);
     setLog(l);
-    const total = l.reduce((acc, e) => ({
-      input: acc.input + e.input_tokens,
-      output: acc.output + e.output_tokens,
-    }), { input: 0, output: 0 });
+    const total = l.reduce((acc, e) => {
+      if (e.cache_hit) {
+        return { ...acc, savedInput: acc.savedInput + e.input_tokens, savedOutput: acc.savedOutput + e.output_tokens };
+      }
+      return { ...acc, spentInput: acc.spentInput + e.input_tokens, spentOutput: acc.spentOutput + e.output_tokens };
+    }, { spentInput: 0, spentOutput: 0, savedInput: 0, savedOutput: 0 });
     setTokenTotal(total);
   }, []);
 
@@ -228,8 +232,11 @@ export default function SettingsPage() {
               {stats.comics} Comics · {stats.pages} Seiten · {stats.cache} Cache-Einträge · {stats.logs} geloggte Aufrufe · {formatBytes(stats.bytes)} belegt
             </Text>
           )}
-          <Text size="sm" mb="sm">
-            Letzte 100 API-Aufrufe: {tokenTotal.input} Input-Tokens, {tokenTotal.output} Output-Tokens
+          <Text size="sm" mb={2}>
+            Letzte 100 API-Aufrufe: {tokenTotal.spentInput} Input-Tokens, {tokenTotal.spentOutput} Output-Tokens
+          </Text>
+          <Text size="sm" c="teal" mb="sm">
+            Durch Cache gespart: {tokenTotal.savedInput} Input-Tokens, {tokenTotal.savedOutput} Output-Tokens
           </Text>
 
           <Group mb="sm">

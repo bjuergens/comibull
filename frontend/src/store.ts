@@ -1,8 +1,7 @@
-// Thin IndexedDB wrapper built on `idb`. Replaces the Postgres schema for
-// comics/pages/ai_call_cache/ai_call_log. One database, four stores:
+// Thin IndexedDB wrapper built on `idb`. One database, four stores:
 //
 //   comics:      ComicRow keyed by id
-//   pages:       PageRow keyed by id, indexed by comic_id + page_number
+//   pages:       PageRow keyed by id
 //   aiCache:     CacheEntry keyed by call_hash (content-addressed responses)
 //   aiCallLog:   CallLogEntry keyed by auto-id — ring buffer trimmed in code
 
@@ -25,7 +24,9 @@ export interface ComicRow {
 export interface PageRow {
   id: number;
   comic_id: number;
-  page_number: number;
+  // Sort key for display order. Internal — not shown to the user. Gaps from
+  // deletes are fine; addPages just picks max(existing) + 1.
+  display_order: number;
   image: Blob;
   regions: Region[] | null;
   status: PageStatus;
@@ -54,34 +55,51 @@ export interface CallLogEntry {
 
 interface Schema extends DBSchema {
   comics: { key: number; value: ComicRow };
-  pages: {
-    key: number;
-    value: PageRow;
-    indexes: { by_comic: [number, number] };
-  };
+  pages: { key: number; value: PageRow };
   aiCache: { key: string; value: CacheEntry };
   aiCallLog: { key: number; value: CallLogEntry };
 }
 
 const DB_NAME = 'comibull';
-const DB_VERSION = 1;
+// Aggressive prototype migration: bumping this nukes every store and starts
+// fresh. Acceptable because the only data here is uploaded comics and an
+// AI-response cache — no user accounts, no anything irreplaceable. The API
+// key lives in localStorage, so it survives.
+const DB_VERSION = 3;
 const CALL_LOG_MAX = 500;
 
 let dbPromise: Promise<IDBPDatabase<Schema>> | null = null;
 
+// Set during the upgrade callback when we wipe data; consumed once by App so
+// the user gets a toast on the boot that follows a schema bump.
+let pendingMigrationNotice: { oldVersion: number; newVersion: number } | null = null;
+let migrationNoticeConsumed = false;
+
 export function db(): Promise<IDBPDatabase<Schema>> {
   if (dbPromise === null) {
     dbPromise = openDB<Schema>(DB_NAME, DB_VERSION, {
-      upgrade(db) {
+      upgrade(db, oldVersion) {
+        if (oldVersion > 0) {
+          pendingMigrationNotice = { oldVersion, newVersion: DB_VERSION };
+          console.warn(`⚠️ comibull: schema upgrade from v${oldVersion} to v${DB_VERSION} — wiping IndexedDB.`);
+          for (const name of Array.from(db.objectStoreNames)) {
+            db.deleteObjectStore(name);
+          }
+        }
         db.createObjectStore('comics', { keyPath: 'id' });
-        const pages = db.createObjectStore('pages', { keyPath: 'id' });
-        pages.createIndex('by_comic', ['comic_id', 'page_number']);
+        db.createObjectStore('pages', { keyPath: 'id' });
         db.createObjectStore('aiCache', { keyPath: 'call_hash' });
         db.createObjectStore('aiCallLog', { keyPath: 'id', autoIncrement: true });
       },
     });
   }
   return dbPromise;
+}
+
+export function consumeMigrationNotice(): { oldVersion: number; newVersion: number } | null {
+  if (migrationNoticeConsumed) return null;
+  migrationNoticeConsumed = true;
+  return pendingMigrationNotice;
 }
 
 // ─── IDs ────────────────────────────────────────────────────────────────
@@ -155,7 +173,7 @@ export async function listPages(comic_id: number): Promise<PageRow[]> {
     const p = await d.get('pages', pid);
     if (p) pages.push(p);
   }
-  return pages.sort((a, b) => a.page_number - b.page_number);
+  return pages.sort((a, b) => a.display_order - b.display_order);
 }
 
 export async function getPage(page_id: number): Promise<PageRow | undefined> {
@@ -168,10 +186,12 @@ export async function addPages(comic_id: number, images: Blob[]): Promise<void> 
   const comic = await d.get('comics', comic_id);
   if (!comic) throw new Error(`comic ${comic_id} not found`);
 
-  // page_numbers are always 1..N contiguous (deletePage renumbers, reorderPages
-  // re-assigns in display order), so the next page_number is just the current
-  // count + 1.
-  const firstPageNumber = comic.page_ids.length + 1;
+  // Gaps from deletes are fine — we never renumber. Pick max(existing) + 1.
+  let maxOrder = 0;
+  for (const pid of comic.page_ids) {
+    const p = await d.get('pages', pid);
+    if (p && p.display_order > maxOrder) maxOrder = p.display_order;
+  }
   const firstId = await nextId('pages');
   const newIds = images.map((_, i) => firstId + i);
 
@@ -180,7 +200,7 @@ export async function addPages(comic_id: number, images: Blob[]): Promise<void> 
     await tx.objectStore('pages').add({
       id: newIds[i]!,
       comic_id,
-      page_number: firstPageNumber + i,
+      display_order: maxOrder + 1 + i,
       image: images[i]!,
       regions: null,
       status: 'idle',
@@ -204,40 +224,25 @@ export async function deletePage(comic_id: number, page_id: number): Promise<voi
   if (!comic) return;
   const tx = d.transaction(['comics', 'pages'], 'readwrite');
   await tx.objectStore('pages').delete(page_id);
-  const updatedComic: ComicRow = {
+  await tx.objectStore('comics').put({
     ...comic,
     page_ids: comic.page_ids.filter(id => id !== page_id),
-  };
-  // Re-number remaining pages so there are no gaps (matches backend behaviour).
-  const remaining: PageRow[] = [];
-  for (const pid of updatedComic.page_ids) {
-    const p = await tx.objectStore('pages').get(pid);
-    if (p) remaining.push(p);
-  }
-  remaining.sort((a, b) => a.page_number - b.page_number);
-  for (let i = 0; i < remaining.length; i++) {
-    const p = remaining[i]!;
-    if (p.page_number !== i + 1) {
-      await tx.objectStore('pages').put({ ...p, page_number: i + 1 });
-    }
-  }
-  await tx.objectStore('comics').put(updatedComic);
+  });
   await tx.done;
 }
 
-export async function reorderPages(comic_id: number, ordered_page_ids: number[]): Promise<void> {
+export async function swapPagePositions(comic_id: number, page_id_a: number, page_id_b: number): Promise<void> {
   const d = await db();
-  const tx = d.transaction(['comics', 'pages'], 'readwrite');
-  for (let i = 0; i < ordered_page_ids.length; i++) {
-    const pid = ordered_page_ids[i]!;
-    const p = await tx.objectStore('pages').get(pid);
-    if (!p) continue;
-    await tx.objectStore('pages').put({ ...p, page_number: i + 1 });
+  const tx = d.transaction('pages', 'readwrite');
+  const a = await tx.store.get(page_id_a);
+  const b = await tx.store.get(page_id_b);
+  if (!a) throw new Error(`page ${page_id_a} not found`);
+  if (!b) throw new Error(`page ${page_id_b} not found`);
+  if (a.comic_id !== comic_id || b.comic_id !== comic_id) {
+    throw new Error(`pages ${page_id_a}, ${page_id_b} not both in comic ${comic_id}`);
   }
-  const comic = await tx.objectStore('comics').get(comic_id);
-  if (comic) {
-    await tx.objectStore('comics').put({ ...comic, page_ids: ordered_page_ids });
-  }
+  await tx.store.put({ ...a, display_order: b.display_order });
+  await tx.store.put({ ...b, display_order: a.display_order });
   await tx.done;
 }
 
