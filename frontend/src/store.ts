@@ -24,7 +24,9 @@ export interface ComicRow {
 export interface PageRow {
   id: number;
   comic_id: number;
-  page_number: number;
+  // Sort key for display order. Internal — not shown to the user. Gaps from
+  // deletes are fine; addPages just picks max(existing) + 1.
+  display_order: number;
   image: Blob;
   regions: Region[] | null;
   status: PageStatus;
@@ -63,16 +65,22 @@ const DB_NAME = 'comibull';
 // fresh. Acceptable because the only data here is uploaded comics and an
 // AI-response cache — no user accounts, no anything irreplaceable. The API
 // key lives in localStorage, so it survives.
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const CALL_LOG_MAX = 500;
 
 let dbPromise: Promise<IDBPDatabase<Schema>> | null = null;
+
+// Set during the upgrade callback when we wipe data; consumed once by App so
+// the user gets a toast on the boot that follows a schema bump.
+let pendingMigrationNotice: { oldVersion: number; newVersion: number } | null = null;
+let migrationNoticeConsumed = false;
 
 export function db(): Promise<IDBPDatabase<Schema>> {
   if (dbPromise === null) {
     dbPromise = openDB<Schema>(DB_NAME, DB_VERSION, {
       upgrade(db, oldVersion) {
         if (oldVersion > 0) {
+          pendingMigrationNotice = { oldVersion, newVersion: DB_VERSION };
           console.warn(`⚠️ comibull: schema upgrade from v${oldVersion} to v${DB_VERSION} — wiping IndexedDB.`);
           for (const name of Array.from(db.objectStoreNames)) {
             db.deleteObjectStore(name);
@@ -86,6 +94,12 @@ export function db(): Promise<IDBPDatabase<Schema>> {
     });
   }
   return dbPromise;
+}
+
+export function consumeMigrationNotice(): { oldVersion: number; newVersion: number } | null {
+  if (migrationNoticeConsumed) return null;
+  migrationNoticeConsumed = true;
+  return pendingMigrationNotice;
 }
 
 // ─── IDs ────────────────────────────────────────────────────────────────
@@ -159,7 +173,7 @@ export async function listPages(comic_id: number): Promise<PageRow[]> {
     const p = await d.get('pages', pid);
     if (p) pages.push(p);
   }
-  return pages.sort((a, b) => a.page_number - b.page_number);
+  return pages.sort((a, b) => a.display_order - b.display_order);
 }
 
 export async function getPage(page_id: number): Promise<PageRow | undefined> {
@@ -172,11 +186,11 @@ export async function addPages(comic_id: number, images: Blob[]): Promise<void> 
   const comic = await d.get('comics', comic_id);
   if (!comic) throw new Error(`comic ${comic_id} not found`);
 
-  // page_number is just a label. Gaps from deletes are fine — we never renumber.
-  let maxNum = 0;
+  // Gaps from deletes are fine — we never renumber. Pick max(existing) + 1.
+  let maxOrder = 0;
   for (const pid of comic.page_ids) {
     const p = await d.get('pages', pid);
-    if (p && p.page_number > maxNum) maxNum = p.page_number;
+    if (p && p.display_order > maxOrder) maxOrder = p.display_order;
   }
   const firstId = await nextId('pages');
   const newIds = images.map((_, i) => firstId + i);
@@ -186,7 +200,7 @@ export async function addPages(comic_id: number, images: Blob[]): Promise<void> 
     await tx.objectStore('pages').add({
       id: newIds[i]!,
       comic_id,
-      page_number: maxNum + 1 + i,
+      display_order: maxOrder + 1 + i,
       image: images[i]!,
       regions: null,
       status: 'idle',
@@ -222,9 +236,13 @@ export async function swapPagePositions(comic_id: number, page_id_a: number, pag
   const tx = d.transaction('pages', 'readwrite');
   const a = await tx.store.get(page_id_a);
   const b = await tx.store.get(page_id_b);
-  if (!a || !b || a.comic_id !== comic_id || b.comic_id !== comic_id) { await tx.done; return; }
-  await tx.store.put({ ...a, page_number: b.page_number });
-  await tx.store.put({ ...b, page_number: a.page_number });
+  if (!a) throw new Error(`page ${page_id_a} not found`);
+  if (!b) throw new Error(`page ${page_id_b} not found`);
+  if (a.comic_id !== comic_id || b.comic_id !== comic_id) {
+    throw new Error(`pages ${page_id_a}, ${page_id_b} not both in comic ${comic_id}`);
+  }
+  await tx.store.put({ ...a, display_order: b.display_order });
+  await tx.store.put({ ...b, display_order: a.display_order });
   await tx.done;
 }
 

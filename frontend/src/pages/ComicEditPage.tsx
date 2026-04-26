@@ -261,7 +261,7 @@ export default function ComicEditPage() {
       >
         {deleteTarget && (
           <Stack>
-            <Text>Möchtest du Seite {deleteTarget.page_number} wirklich löschen?</Text>
+            <Text>Möchtest du diese Seite wirklich löschen?</Text>
             <Text c="red" size="sm">Die Seite und alle Analysen werden unwiderruflich entfernt.</Text>
             <Group justify="flex-end">
               <Button variant="default" onClick={() => setDeleteTarget(null)}>Abbrechen</Button>

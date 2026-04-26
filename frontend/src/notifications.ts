@@ -4,6 +4,10 @@ export function showError(title: string, message: string) {
   notifications.show({ color: 'red', title, message, autoClose: 8000 });
 }
 
+export function showWarning(title: string, message: string) {
+  notifications.show({ color: 'yellow', title, message, autoClose: false });
+}
+
 export function showSuccess(title: string, message: string) {
   notifications.show({ color: 'teal', title, message, autoClose: 5000 });
 }
