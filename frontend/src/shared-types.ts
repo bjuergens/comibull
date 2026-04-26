@@ -87,7 +87,7 @@ export const DETECT_PROMPT = (lang: string) =>
   `You are looking at a ${lang} comic book page. Find every text region (speech/thought bubbles, narration boxes, sound effects) and for each one return a normalized bounding box and the transcribed text.
 
 For each region:
-- bbox: [x1, y1, x2, y2] in normalized 0–1 page coordinates (top-left origin). The box should cover the entire visible container (the bubble outline, caption box border, or sfx lettering extent) — not just the text characters inside. Include the full tail of speech bubbles. Be as precise as possible: measure carefully, then double-check each coordinate against the image before returning.
+- bbox: [x1, y1, x2, y2] in normalized 0–1 page coordinates (top-left origin). Tight box around the text, small padding is fine. Be as precise as possible: measure carefully, then double-check each coordinate against the image before returning.
 - ocr_text: exact text as written. Text is usually hand-lettered and uppercase — watch for characters that look similar (S/J, E/L, A/H). Preserve line breaks with "\\n". If multiple separate text blocks are inside one bubble, join with "\\n----\\n".
 - type: "dialogue" (speech/thought bubbles with tails), "narration" (rectangular caption boxes), "sfx" (loose stylized sound-effect text), or "other".
 
