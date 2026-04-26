@@ -1,12 +1,20 @@
 // localStorage-backed settings. Replaces the server-side users.settings JSONB
 // and ai_settings table. Small enough for localStorage; API key fits trivially.
+//
+// Reads validate via arktype's .assert() — malformed JSON or shape drift throws
+// loudly and bubbles to the global error handler. Schema bumps wipe IndexedDB
+// (see store.ts); localStorage follows the same lean policy: if a previous
+// version's settings shape no longer parses, the user clears them in Settings.
 
 import {
   type AiCallType,
   type CallTypeConfig,
+  callTypeConfigSchema,
   DEFAULT_AI_CONFIG,
   DEFAULT_USER_SETTINGS,
+  modelConfigMapSchema,
   type UserSettings,
+  userSettingsSchema,
 } from './shared-types';
 
 const KEYS = {
@@ -31,11 +39,7 @@ export function clearApiKey(): void {
 export function readUserSettings(): UserSettings {
   const raw = localStorage.getItem(KEYS.settings);
   if (!raw) return DEFAULT_USER_SETTINGS;
-  try {
-    return { ...DEFAULT_USER_SETTINGS, ...JSON.parse(raw) as Partial<UserSettings> };
-  } catch {
-    return DEFAULT_USER_SETTINGS;
-  }
+  return userSettingsSchema.assert(JSON.parse(raw));
 }
 
 export function writeUserSettings(s: UserSettings): void {
@@ -45,24 +49,14 @@ export function writeUserSettings(s: UserSettings): void {
 export function readModelConfig(call_type: AiCallType): CallTypeConfig | null {
   const raw = localStorage.getItem(KEYS.modelConfig);
   if (!raw) return null;
-  try {
-    const all = JSON.parse(raw) as Partial<Record<AiCallType, CallTypeConfig>>;
-    return all[call_type] ?? null;
-  } catch {
-    return null;
-  }
+  return modelConfigMapSchema.assert(JSON.parse(raw))[call_type] ?? null;
 }
 
 export function writeModelConfig(call_type: AiCallType, config: CallTypeConfig): void {
   const raw = localStorage.getItem(KEYS.modelConfig);
-  let all: Partial<Record<AiCallType, CallTypeConfig>> = {};
-  if (raw) {
-    try {
-      all = JSON.parse(raw) as Partial<Record<AiCallType, CallTypeConfig>>;
-    } catch { /* ignore malformed */ }
-  }
-  all[call_type] = config;
-  localStorage.setItem(KEYS.modelConfig, JSON.stringify(all));
+  const map = raw ? modelConfigMapSchema.assert(JSON.parse(raw)) : {};
+  map[call_type] = callTypeConfigSchema.assert(config);
+  localStorage.setItem(KEYS.modelConfig, JSON.stringify(map));
 }
 
 export function resetModelConfig(): void {

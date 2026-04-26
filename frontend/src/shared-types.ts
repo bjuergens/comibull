@@ -1,8 +1,16 @@
 // Ported from backend/app/shared_types.py + prompts/. This file is the single
 // source of truth for domain types and Anthropic prompt templates now that the
 // backend is gone.
+//
+// Schemas are defined once with arktype: the TypeScript type is `typeof
+// schema.infer`, the runtime validator is `schema(value)`, and the JSON Schema
+// sent to Anthropic for tool input is `schema.toJsonSchema()`. No more parallel
+// definitions to drift apart.
 
-export type SourceLanguage = 'fr' | 'ja';
+import { type } from 'arktype';
+
+export const sourceLanguageSchema = type("'fr' | 'ja'");
+export type SourceLanguage = typeof sourceLanguageSchema.infer;
 export const SOURCE_LANGUAGES: SourceLanguage[] = ['fr', 'ja'];
 export const DEFAULT_SOURCE_LANGUAGE: SourceLanguage = 'fr';
 
@@ -15,48 +23,73 @@ export const LANGUAGE_LABELS: Record<SourceLanguage, { de: string; native: strin
 // Target language the app teaches *to*. Single-target for now.
 export const TARGET_LANGUAGE_NAME = 'German';
 
-export type CefrLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
+export const cefrLevelSchema = type("'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2'");
+export type CefrLevel = typeof cefrLevelSchema.infer;
 
-export type Bbox = [number, number, number, number];
+export const bboxSchema = type(['number', 'number', 'number', 'number']);
+export type Bbox = typeof bboxSchema.infer;
 
-export interface RegionAnalysis {
-  vocabulary: { source: string; target: string; notes: string }[];
-  grammar_notes: string[];
-  translation: string;
-  difficulty: CefrLevel;
-  cultural_notes: string;
-}
+export const regionTypeSchema = type("'dialogue' | 'narration' | 'sfx' | 'other'");
 
-export interface Region {
-  bbox: Bbox;
-  type?: 'dialogue' | 'narration' | 'sfx' | 'other';
-  ocr_text?: string;
+export const regionAnalysisSchema = type({
+  vocabulary: type({
+    source: 'string',
+    target: 'string',
+    notes: 'string',
+    '+': 'reject',
+  }).array(),
+  grammar_notes: 'string[]',
+  translation: 'string',
+  difficulty: cefrLevelSchema,
+  cultural_notes: 'string',
+  '+': 'reject',
+});
+export type RegionAnalysis = typeof regionAnalysisSchema.infer;
+
+export const regionSchema = type({
+  bbox: bboxSchema,
+  'type?': regionTypeSchema,
+  'ocr_text?': 'string',
   // Provenance: "anthropic" = produced by detect(); "manual" = user added or edited;
   // combinations like "anthropic+manual" mean auto-produced then user-edited.
-  source: string;
-  analysis?: RegionAnalysis;
-}
+  source: 'string',
+  'analysis?': regionAnalysisSchema,
+});
+export type Region = typeof regionSchema.infer;
 
-export type PageStatus = 'idle' | 'processing' | 'error';
+export const pageStatusSchema = type("'idle' | 'processing' | 'error'");
+export type PageStatus = typeof pageStatusSchema.infer;
 
 // Stored in localStorage. Only account-global preferences belong here;
 // per-browser UI toggles (debugMode, collapsed panels) live in their own keys.
-export interface UserSettings {
-  canEditTextboxes: boolean;
-  defaultLanguage: SourceLanguage;
-}
+export const userSettingsSchema = type({
+  canEditTextboxes: 'boolean',
+  defaultLanguage: sourceLanguageSchema,
+  '+': 'reject',
+});
+export type UserSettings = typeof userSettingsSchema.infer;
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
   canEditTextboxes: false,
   defaultLanguage: 'fr',
 };
 
-export type AiCallType = 'detect' | 'analyze';
+export const aiCallTypeSchema = type("'detect' | 'analyze'");
+export type AiCallType = typeof aiCallTypeSchema.infer;
 
-export interface CallTypeConfig {
-  model: string;
-  max_tokens: number;
-}
+export const callTypeConfigSchema = type({
+  model: 'string',
+  max_tokens: 'number.integer > 0',
+  '+': 'reject',
+});
+export type CallTypeConfig = typeof callTypeConfigSchema.infer;
+
+// Map shape stored in localStorage under 'ai_model_config'.
+export const modelConfigMapSchema = type({
+  'detect?': callTypeConfigSchema,
+  'analyze?': callTypeConfigSchema,
+  '+': 'reject',
+});
 
 export const ALLOWED_AI_MODELS: { id: string; label: string }[] = [
   { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
@@ -114,75 +147,41 @@ ${regionsJson}
 
 Return one analysis entry per region, in the same order. Use region_index starting from 0.`;
 
-// JSON schemas used by the Anthropic structured-output feature.
-export const DETECT_SCHEMA = {
-  type: 'object',
-  properties: {
-    regions: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          bbox: {
-            type: 'array',
-            items: { type: 'number' },
-            minItems: 4,
-            maxItems: 4,
-          },
-          ocr_text: { type: 'string' },
-          type: { type: 'string', enum: ['dialogue', 'narration', 'sfx', 'other'] },
-        },
-        required: ['bbox', 'ocr_text', 'type'],
-        additionalProperties: false,
-      },
-    },
-  },
-  required: ['regions'],
-  additionalProperties: false,
-} as const;
+// ─── Anthropic structured-output schemas ─────────────────────────────────
+// Defined once with arktype, then handed to Anthropic as JSON Schema (via
+// .toJsonSchema()) AND used to validate the response. No drift possible.
 
-export const ANALYZE_SCHEMA = {
-  type: 'object',
-  properties: {
-    analyses: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          region_index: { type: 'integer' },
-          vocabulary: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                source: { type: 'string' },
-                target: { type: 'string' },
-                notes: { type: 'string' },
-              },
-              required: ['source', 'target', 'notes'],
-              additionalProperties: false,
-            },
-          },
-          grammar_notes: { type: 'array', items: { type: 'string' } },
-          difficulty: { type: 'string', enum: ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'] },
-          cultural_notes: { type: 'string' },
-          translation: { type: 'string' },
-        },
-        required: [
-          'region_index',
-          'vocabulary',
-          'grammar_notes',
-          'difficulty',
-          'cultural_notes',
-          'translation',
-        ],
-        additionalProperties: false,
-      },
-    },
-  },
-  required: ['analyses'],
-  additionalProperties: false,
-} as const;
+export const detectResponseSchema = type({
+  regions: type({
+    bbox: bboxSchema,
+    ocr_text: 'string',
+    type: regionTypeSchema,
+    '+': 'reject',
+  }).array(),
+  '+': 'reject',
+});
+
+// Analyze returns one entry per region with a region_index pointing back at the
+// input order. The rest of each entry matches RegionAnalysis exactly. We re-list
+// the fields rather than .merge()'ing because arktype's merge drops the source
+// type's '+': 'reject' rule, silently allowing extras.
+export const analyzeResponseSchema = type({
+  analyses: type({
+    region_index: 'number.integer >= 0',
+    vocabulary: type({
+      source: 'string',
+      target: 'string',
+      notes: 'string',
+      '+': 'reject',
+    }).array(),
+    grammar_notes: 'string[]',
+    translation: 'string',
+    difficulty: cefrLevelSchema,
+    cultural_notes: 'string',
+    '+': 'reject',
+  }).array(),
+  '+': 'reject',
+});
 
 // Helper functions ─────────────────────────────────────────────────────────
 
