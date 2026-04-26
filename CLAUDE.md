@@ -73,7 +73,7 @@ Use consistently in code, commits, and logging.
 
 ## Deployment
 
-Static SPA. `bun run build` produces `frontend/dist/`. CI deploys it to GitHub Pages via `peaceiris/actions-gh-pages` (see `.github/workflows/ci.yml`). The build is base-path-aware: `VITE_BASE_PATH` controls Vite's `base`, and React Router uses `import.meta.env.BASE_URL` as `basename` — so the same bundle works under any subpath. A `404.html` copy of `index.html` provides SPA fallback on Pages. `VITE_BUILD_TIME` is baked into the build and shown on the Settings page.
+Static SPA. `bun run build` produces `frontend/dist/`. CI deploys it to GitHub Pages via `peaceiris/actions-gh-pages` (see `.github/workflows/ci.yml`). The build is base-path-aware: `VITE_BASE_PATH` controls Vite's `base` so assets resolve under any subpath. Routing uses `HashRouter` (URLs look like `/comibull/branch/main/#/comics/1`) — the hash keeps reload working on GH Pages, which doesn't serve per-directory `404.html` for project sites. `VITE_BUILD_TIME` is baked into the build and shown on the Settings page.
 
 ## Don't
 

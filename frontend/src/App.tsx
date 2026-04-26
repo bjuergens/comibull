@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { HashRouter, Route, Routes } from 'react-router-dom';
 import { SettingsProvider } from './SettingsContext';
 import AppLayout from './components/AppLayout';
 import HomePage from './pages/HomePage';
@@ -30,7 +30,7 @@ export default function App() {
   }, []);
 
   return (
-    <BrowserRouter basename={import.meta.env.BASE_URL}>
+    <HashRouter>
       <SettingsProvider>
         <Routes>
           <Route element={<AppLayout />}>
@@ -44,6 +44,6 @@ export default function App() {
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </SettingsProvider>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
