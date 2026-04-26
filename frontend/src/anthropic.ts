@@ -10,20 +10,20 @@
 // supported and doesn't depend on any preview API surface.
 // https://docs.anthropic.com/en/docs/agents-and-tools/tool-use
 
+import { type, type Type } from 'arktype';
 import {
   ANALYZE_PROMPT,
-  ANALYZE_SCHEMA,
+  analyzeResponseSchema,
   DEFAULT_AI_CONFIG,
   DEFAULT_SOURCE_LANGUAGE,
   DETECT_PROMPT,
-  DETECT_SCHEMA,
+  detectResponseSchema,
   LANGUAGE_LABELS,
-  type RegionAnalysis,
-  type SourceLanguage,
   SYSTEM_PROMPT,
   TARGET_LANGUAGE_NAME,
   type CallTypeConfig,
   type Region,
+  type SourceLanguage,
   type AiCallType,
 } from './shared-types';
 import { cacheLookup, cacheStore, logCall } from './store';
@@ -66,20 +66,31 @@ async function blobToBase64(blob: Blob): Promise<string> {
   return btoa(bin);
 }
 
-interface AnthropicResponse {
-  content: { type: string; text?: string; name?: string; input?: unknown }[];
-  usage: { input_tokens: number; output_tokens: number };
-  stop_reason: string;
-  id: string;
-}
+// Validates the /v1/messages envelope. The model-supplied `input` is left
+// untyped here; the per-call schema validates it next.
+const anthropicEnvelopeSchema = type({
+  content: type({
+    type: 'string',
+    'text?': 'string',
+    'name?': 'string',
+    'input?': 'unknown',
+  }).array(),
+  usage: { input_tokens: 'number.integer', output_tokens: 'number.integer' },
+  stop_reason: 'string',
+  id: 'string',
+});
 
-interface CallArgs {
+const anthropicErrorSchema = type({
+  'error?': { 'message?': 'string' },
+});
+
+interface CallArgs<S extends Type> {
   call_type: AiCallType;
   config: CallTypeConfig;
   system: string;
   prompt: string;
   image?: { media_type: string; data: string };
-  schema: unknown;
+  schema: S;
   page_id: number | null;
 }
 
@@ -113,15 +124,21 @@ function anthropicHeaders(apiKey: string): Record<string, string> {
 }
 
 async function readErrorMessage(res: Response): Promise<string> {
-  let message = `${res.status} ${res.statusText}`;
+  const fallback = `${res.status} ${res.statusText}`;
   try {
-    const err = await res.json() as { error?: { message?: string } };
-    if (err.error?.message) message = err.error.message;
-  } catch { /* not JSON */ }
-  return message;
+    const parsed = anthropicErrorSchema(await res.json());
+    if (parsed instanceof type.errors) return fallback;
+    return parsed.error?.message ?? fallback;
+  } catch {
+    return fallback;
+  }
 }
 
-async function callClaude(args: CallArgs): Promise<{ parsed: unknown; tokens: { input: number; output: number }; cache_hit: boolean }> {
+async function callClaude<S extends Type>(args: CallArgs<S>): Promise<{
+  parsed: S['infer'];
+  tokens: { input: number; output: number };
+  cache_hit: boolean;
+}> {
   const apiKey = readApiKey();
   if (!apiKey) throw new MissingApiKeyError();
 
@@ -142,7 +159,7 @@ async function callClaude(args: CallArgs): Promise<{ parsed: unknown; tokens: { 
     tools: [{
       name: STRUCTURED_TOOL_NAME,
       description: 'Submit the structured result. This is the only valid action.',
-      input_schema: args.schema,
+      input_schema: args.schema.toJsonSchema(),
     }],
     tool_choice: { type: 'tool', name: STRUCTURED_TOOL_NAME },
   };
@@ -151,18 +168,25 @@ async function callClaude(args: CallArgs): Promise<{ parsed: unknown; tokens: { 
   const call_hash = await sha256Hex(JSON.stringify(body));
   const hit = await cacheLookup(call_hash);
   if (hit) {
-    // Log the would-have-been tokens so Settings can show "tokens saved".
-    // cache_hit=true marks this row as savings, not real spend.
-    await logCall({
-      call_type: args.call_type,
-      model: args.config.model,
-      input_tokens: hit.input_tokens,
-      output_tokens: hit.output_tokens,
-      cache_hit: true,
-      page_id: args.page_id,
-      created_at: new Date().toISOString(),
-    });
-    return { parsed: hit.response_json, tokens: { input: 0, output: 0 }, cache_hit: true };
+    // Validate the cached payload against the current schema. If it doesn't
+    // match (schema changed, prior bug, manual DB edit) we silently fall
+    // through to a fresh API call rather than handing junk to the caller.
+    const cached = args.schema(hit.response_json);
+    if (!(cached instanceof type.errors)) {
+      // Log the would-have-been tokens so Settings can show "tokens saved".
+      // cache_hit=true marks this row as savings, not real spend.
+      await logCall({
+        call_type: args.call_type,
+        model: args.config.model,
+        input_tokens: hit.input_tokens,
+        output_tokens: hit.output_tokens,
+        cache_hit: true,
+        page_id: args.page_id,
+        created_at: new Date().toISOString(),
+      });
+      return { parsed: cached, tokens: { input: 0, output: 0 }, cache_hit: true };
+    }
+    console.warn('⚠️ cached AI response no longer matches schema, re-fetching:', cached.summary);
   }
 
   const res = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
@@ -173,7 +197,10 @@ async function callClaude(args: CallArgs): Promise<{ parsed: unknown; tokens: { 
 
   if (!res.ok) throw new AnthropicError(res.status, await readErrorMessage(res));
 
-  const json = await res.json() as AnthropicResponse;
+  const json = anthropicEnvelopeSchema(await res.json());
+  if (json instanceof type.errors) {
+    throw new AnthropicError(0, `Antwort hat unerwartete Form: ${json.summary}`);
+  }
   // tool_use is the expected stop reason when tool_choice forces a tool.
   // Anything else (max_tokens, refusal, end_turn-without-tool) means the
   // model didn't comply — fail loud rather than try to recover.
@@ -188,7 +215,10 @@ async function callClaude(args: CallArgs): Promise<{ parsed: unknown; tokens: { 
   if (!toolBlock || toolBlock.input === undefined) {
     throw new AnthropicError(0, 'Keine tool_use-Antwort erhalten.');
   }
-  const parsed = toolBlock.input;
+  const parsed = args.schema(toolBlock.input);
+  if (parsed instanceof type.errors) {
+    throw new AnthropicError(0, `Antwort entspricht nicht dem Schema: ${parsed.summary}`);
+  }
 
   const tokens = { input: json.usage.input_tokens, output: json.usage.output_tokens };
   await cacheStore({
@@ -228,15 +258,10 @@ export async function detectPage(
     system: SYSTEM_PROMPT(langName),
     prompt: DETECT_PROMPT(langName),
     image: { media_type: mediaType, data },
-    schema: DETECT_SCHEMA,
+    schema: detectResponseSchema,
     page_id,
   });
-  // The schema enforces bbox: [n,n,n,n] and type ∈ {dialogue,narration,sfx,other}.
-  // If Claude violated the schema we'd have thrown upstream — trust the shape here.
-  const out = parsed as {
-    regions: { bbox: [number, number, number, number]; ocr_text: string; type: Region['type'] }[];
-  };
-  return out.regions.map(r => ({
+  return parsed.regions.map(r => ({
     bbox: r.bbox,
     ocr_text: r.ocr_text,
     type: r.type,
@@ -262,15 +287,14 @@ export async function analyzeRegions(
     config,
     system: SYSTEM_PROMPT(langName),
     prompt: ANALYZE_PROMPT(langName, TARGET_LANGUAGE_NAME, JSON.stringify(payload, null, 2)),
-    schema: ANALYZE_SCHEMA,
+    schema: analyzeResponseSchema,
     page_id,
   });
-  const out = parsed as { analyses: (RegionAnalysis & { region_index: number })[] };
   return regions.map((r, i) => {
-    const a = out.analyses.find(x => x.region_index === i);
+    const a = parsed.analyses.find(x => x.region_index === i);
     if (!a) return r;
     const { region_index: _ri, ...analysis } = a;
-    return { ...r, analysis: analysis };
+    return { ...r, analysis };
   });
 }
 

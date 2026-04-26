@@ -1,12 +1,19 @@
 // localStorage-backed settings. Replaces the server-side users.settings JSONB
 // and ai_settings table. Small enough for localStorage; API key fits trivially.
+//
+// Reads are validated with arktype: malformed JSON or shape drift falls back
+// to defaults rather than poisoning the in-memory state with `as` casts.
 
+import { type } from 'arktype';
 import {
   type AiCallType,
   type CallTypeConfig,
+  callTypeConfigSchema,
   DEFAULT_AI_CONFIG,
   DEFAULT_USER_SETTINGS,
+  modelConfigMapSchema,
   type UserSettings,
+  userSettingsSchema,
 } from './shared-types';
 
 const KEYS = {
@@ -28,41 +35,45 @@ export function clearApiKey(): void {
   localStorage.removeItem(KEYS.apiKey);
 }
 
-export function readUserSettings(): UserSettings {
-  const raw = localStorage.getItem(KEYS.settings);
-  if (!raw) return DEFAULT_USER_SETTINGS;
+// Parse JSON without throwing. Validation happens via arktype below.
+function readJson(key: string): unknown {
+  const raw = localStorage.getItem(key);
+  if (!raw) return null;
   try {
-    return { ...DEFAULT_USER_SETTINGS, ...JSON.parse(raw) as Partial<UserSettings> };
+    return JSON.parse(raw);
   } catch {
-    return DEFAULT_USER_SETTINGS;
+    return null;
   }
+}
+
+export function readUserSettings(): UserSettings {
+  const parsed = userSettingsSchema(readJson(KEYS.settings));
+  if (parsed instanceof type.errors) return DEFAULT_USER_SETTINGS;
+  return { ...DEFAULT_USER_SETTINGS, ...parsed };
 }
 
 export function writeUserSettings(s: UserSettings): void {
   localStorage.setItem(KEYS.settings, JSON.stringify(s));
 }
 
+function readModelConfigMap(): Record<AiCallType, CallTypeConfig | undefined> {
+  const parsed = modelConfigMapSchema(readJson(KEYS.modelConfig));
+  if (parsed instanceof type.errors) return { detect: undefined, analyze: undefined };
+  return { detect: parsed.detect, analyze: parsed.analyze };
+}
+
 export function readModelConfig(call_type: AiCallType): CallTypeConfig | null {
-  const raw = localStorage.getItem(KEYS.modelConfig);
-  if (!raw) return null;
-  try {
-    const all = JSON.parse(raw) as Partial<Record<AiCallType, CallTypeConfig>>;
-    return all[call_type] ?? null;
-  } catch {
-    return null;
-  }
+  return readModelConfigMap()[call_type] ?? null;
 }
 
 export function writeModelConfig(call_type: AiCallType, config: CallTypeConfig): void {
-  const raw = localStorage.getItem(KEYS.modelConfig);
-  let all: Partial<Record<AiCallType, CallTypeConfig>> = {};
-  if (raw) {
-    try {
-      all = JSON.parse(raw) as Partial<Record<AiCallType, CallTypeConfig>>;
-    } catch { /* ignore malformed */ }
+  const validated = callTypeConfigSchema(config);
+  if (validated instanceof type.errors) {
+    throw new Error(`Invalid CallTypeConfig: ${validated.summary}`);
   }
-  all[call_type] = config;
-  localStorage.setItem(KEYS.modelConfig, JSON.stringify(all));
+  const map = readModelConfigMap();
+  map[call_type] = validated;
+  localStorage.setItem(KEYS.modelConfig, JSON.stringify(map));
 }
 
 export function resetModelConfig(): void {

@@ -17,6 +17,7 @@
     "@mantine/hooks": "^9.0.0",
     "@mantine/notifications": "^9.0.0",
     "@panzoom/panzoom": "^4.6.1",
+    "arktype": "^2.2.0",
     "idb": "^8.0.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

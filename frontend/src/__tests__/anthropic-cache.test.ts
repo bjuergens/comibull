@@ -134,4 +134,44 @@ describe('anthropic.ts caching', () => {
     await expect(analyzeRegions([sampleRegion], 'fr')).rejects.toThrow('invalid_api_key');
     expect(mocks.cacheStore).not.toHaveBeenCalled();
   });
+
+  it('throws when the model returns a payload that violates the schema', async () => {
+    // Schema-violating cases used to be a class of bugs you had to hand-test
+    // (missing field, wrong CEFR level, extra props, …). Arktype catches them
+    // structurally — one test confirms the boundary is wired up.
+    mocks.cacheLookup.mockResolvedValue(undefined);
+    const malformed = {
+      ...ANALYZE_RESPONSE,
+      content: [{
+        type: 'tool_use',
+        name: 'submit_result',
+        input: { analyses: [{ region_index: 0, vocabulary: [], grammar_notes: [], difficulty: 'Z9', cultural_notes: '', translation: 'x' }] },
+      }],
+    };
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify(malformed), { status: 200 }),
+    );
+
+    await expect(analyzeRegions([sampleRegion], 'fr')).rejects.toThrow(/Schema/);
+    expect(mocks.cacheStore).not.toHaveBeenCalled();
+  });
+
+  it('treats a cached payload that no longer matches the schema as a miss', async () => {
+    // Schema drift safety net: stale cache entries don't poison new responses.
+    mocks.cacheLookup.mockResolvedValue({
+      call_hash: 'whatever',
+      call_type: 'analyze',
+      response_json: { analyses: [{ region_index: 0, difficulty: 'A1', vocabulary: [], grammar_notes: [], translation: 'old' /* missing cultural_notes */ }] },
+      input_tokens: 1,
+      output_tokens: 1,
+      created_at: '2026-04-24T00:00:00Z',
+    });
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify(ANALYZE_RESPONSE), { status: 200 }),
+    );
+
+    const out = await analyzeRegions([sampleRegion], 'fr');
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect(out[0]?.analysis?.translation).toBe('hello');
+  });
 });
