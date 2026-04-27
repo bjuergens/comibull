@@ -3,6 +3,7 @@
 // (notably: image_url as a string, since <img src> can't take a Blob).
 
 import type { ComicRow, PageRow } from '../store';
+import { assertWebpBlob } from '../image-conversion';
 import type { PageStatus, Region, SourceLanguage } from '../shared-types';
 export type { Bbox, Region, RegionAnalysis, CefrLevel, PageStatus } from '../shared-types';
 export { markManuallyEdited, replaceRegionAt, REGION_TYPE_LABEL } from '../shared-types';
@@ -32,14 +33,17 @@ export function buildComicDetail(comic: ComicRow, pages: PageRow[]): ComicDetail
     title: comic.title,
     source_language: comic.source_language,
     created_at: comic.created_at,
-    pages: pages.map(row => ({
-      id: row.id,
-      display_order: row.display_order,
-      image_url: URL.createObjectURL(row.image),
-      regions: row.regions,
-      status: row.status,
-      error_message: row.error_message,
-    })),
+    pages: pages.map(row => {
+      assertWebpBlob(row.image);
+      return {
+        id: row.id,
+        display_order: row.display_order,
+        image_url: URL.createObjectURL(row.image),
+        regions: row.regions,
+        status: row.status,
+        error_message: row.error_message,
+      };
+    }),
   };
 }
 

@@ -6,6 +6,7 @@ import {
   Container,
   Divider,
   Group,
+  NumberInput,
   PasswordInput,
   Select,
   Stack,
@@ -189,6 +190,14 @@ export default function SettingsPage() {
               label="Debug-Modus (Debug-Werte im Leser)"
               checked={debugMode}
               onChange={(e) => { writeDebugMode(e.currentTarget.checked); setDebugModeState(e.currentTarget.checked); }}
+            />
+            <NumberInput
+              label="WebP-Qualität für neue Seiten (1–100)"
+              description="Niedrigere Werte = kleinere Dateien. Standard: 50. Wirkt nur auf neue Uploads."
+              min={1}
+              max={100}
+              value={settings.webpQuality}
+              onChange={(v) => { if (typeof v === 'number') setSetting('webpQuality', v); }}
             />
           </Stack>
         </section>

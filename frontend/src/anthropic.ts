@@ -27,6 +27,7 @@ import {
   type AiCallType,
 } from './shared-types';
 import { cacheLookup, cacheStore, logCall } from './store';
+import { assertWebpBlob } from './image-conversion';
 import { readApiKey, readModelConfig } from './user-settings';
 
 export class AnthropicError extends Error {
@@ -245,8 +246,9 @@ export async function detectPage(
 ): Promise<Region[]> {
   const config = readModelConfig('detect') ?? DEFAULT_AI_CONFIG.detect;
   const langName = LANGUAGE_LABELS[source_language].en;
+  assertWebpBlob(image);
   const data = await blobToBase64(image);
-  const mediaType = image.type || 'image/png';
+  const mediaType = 'image/webp';
   const { parsed } = await callClaude({
     call_type: 'detect',
     config,

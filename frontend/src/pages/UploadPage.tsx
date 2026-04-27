@@ -5,6 +5,7 @@ import { useLayoutContext } from '../components/AppLayout';
 import { useSettings } from '../SettingsContext';
 import { showError } from '../notifications';
 import { addPages, createComic } from '../store';
+import { toWebp } from '../image-conversion';
 import { LANGUAGE_LABELS, SOURCE_LANGUAGES } from '../shared-types';
 
 export default function UploadPage() {
@@ -29,7 +30,8 @@ export default function UploadPage() {
     setUploading(true);
     try {
       const comic = await createComic(title.trim() || pageFiles[0]!.name.replace(/\.[^.]+$/, ''), language);
-      await addPages(comic.id, pageFiles);
+      const webpFiles = await Promise.all(pageFiles.map(f => toWebp(f, settings.webpQuality)));
+      await addPages(comic.id, webpFiles);
       void navigate(`/comics/${comic.id}`);
     } catch (err) {
       showError('Hochladen fehlgeschlagen', err instanceof Error ? err.message : 'Unbekannter Fehler');
