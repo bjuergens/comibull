@@ -95,23 +95,39 @@ export async function mockAnthropic(page: Page, opts: MockOptions = {}): Promise
 }
 
 // Seed the API key into localStorage so tests can skip the Settings dance.
+// addInitScript covers post-reload state; evaluate covers the already-loaded
+// page (the test never does a full reload between resetState and the first
+// action under HashRouter, so addInitScript alone wouldn't fire).
 export async function seedApiKey(page: Page, key = 'sk-test-123'): Promise<void> {
   await page.addInitScript((k) => {
+    localStorage.setItem('anthropic_api_key', k);
+  }, key);
+  await page.evaluate((k) => {
     localStorage.setItem('anthropic_api_key', k);
   }, key);
 }
 
 // Wipe IndexedDB + localStorage between tests for a clean slate.
+// We clear the existing object stores rather than deleteDatabase: the React
+// app mounted by `page.goto('/')` holds an open connection, which blocks
+// deleteDatabase indefinitely. The blocked request would then fire later,
+// when page.reload() finally closes the connection — wiping data mid-test.
 export async function resetState(page: Page): Promise<void> {
   await page.goto('/');
   await page.evaluate(async () => {
     localStorage.clear();
-    const dbs = await indexedDB.databases?.() ?? [];
-    for (const { name } of dbs) {
-      if (name) await new Promise<void>((resolve) => {
-        const req = indexedDB.deleteDatabase(name);
-        req.onsuccess = req.onerror = req.onblocked = () => resolve();
-      });
-    }
+    await new Promise<void>((resolve) => {
+      const req = indexedDB.open('comibull');
+      req.onerror = () => resolve();
+      req.onsuccess = () => {
+        const db = req.result;
+        const stores = Array.from(db.objectStoreNames);
+        if (stores.length === 0) { db.close(); resolve(); return; }
+        const tx = db.transaction(stores, 'readwrite');
+        for (const s of stores) tx.objectStore(s).clear();
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => { db.close(); resolve(); };
+      };
+    });
   });
 }

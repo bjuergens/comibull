@@ -76,6 +76,9 @@ export function writeDebugMode(on: boolean): void {
   else localStorage.removeItem(KEYS.debugMode);
 }
 
-export function clearAllSettings(): void {
-  for (const k of Object.values(KEYS)) localStorage.removeItem(k);
+export function clearAllSettingsExceptApiKey(): void {
+  for (const k of Object.values(KEYS)) {
+    if (k === KEYS.apiKey) continue;
+    localStorage.removeItem(k);
+  }
 }

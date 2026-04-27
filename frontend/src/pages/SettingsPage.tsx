@@ -17,7 +17,7 @@ import {
 import { useLayoutContext } from '../components/AppLayout';
 import { useSettings } from '../SettingsContext';
 import {
-  clearAllSettings,
+  clearAllSettingsExceptApiKey,
   clearApiKey,
   getEffectiveModelConfig,
   readApiKey,
@@ -129,13 +129,12 @@ export default function SettingsPage() {
   }
 
   async function handleWipe() {
-    if (!confirm('Alle Daten (Comics, Seiten, Cache, Einstellungen, API-Schlüssel) löschen?')) return;
+    if (!confirm('Alle Daten (Comics, Seiten, Cache, Einstellungen) löschen? Der API-Schlüssel bleibt erhalten.')) return;
     await clearAll();
-    clearAllSettings();
-    setApiKey('');
+    clearAllSettingsExceptApiKey();
     setDebugModeState(false);
     await refreshDiag();
-    showSuccess('Alles gelöscht', 'Seite neu laden für sauberen Zustand.');
+    showSuccess('Daten gelöscht', 'API-Schlüssel bleibt erhalten. Seite neu laden für sauberen Zustand.');
   }
 
   return (
@@ -242,7 +241,7 @@ export default function SettingsPage() {
           <Group mb="sm">
             <Button variant="subtle" onClick={() => { void handleClearCache(); }}>Cache leeren</Button>
             <Button variant="light" color="red" onClick={() => { void handleWipe(); }}>
-              Alle Daten löschen
+              Daten löschen (Schlüssel bleibt)
             </Button>
           </Group>
 

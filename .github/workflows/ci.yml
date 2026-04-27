@@ -92,8 +92,6 @@ jobs:
           VITE_BUILD_TIME: ${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at }}
         run: bun run build
         working-directory: frontend
-      - name: SPA fallback (404.html)
-        run: cp frontend/dist/index.html frontend/dist/404.html
       - name: Deploy branch build
         uses: peaceiris/actions-gh-pages@v4
         with:

@@ -15,7 +15,7 @@ test('home page renders and prompts for API key when none is set', async ({ page
 test('Settings: saving an API key tests it and shows success', async ({ page }) => {
   await mockAnthropic(page);
 
-  await page.goto('/settings');
+  await page.goto('/#/settings');
   await page.getByLabel(/API-Schlüssel/i).first().fill('sk-test-123');
   await page.getByRole('button', { name: /Speichern & Testen/i }).click();
 
@@ -32,7 +32,7 @@ test('upload → analyze → region visible with translation', async ({ page }) 
   await mockAnthropic(page);
 
   // Upload page — pick one tiny PNG, submit.
-  await page.goto('/upload');
+  await page.goto('/#/upload');
   await page.getByTestId('page-file-input').setInputFiles({
     name: 'p1.png',
     mimeType: 'image/png',
@@ -62,7 +62,7 @@ test('library persists uploaded comics across reloads', async ({ page }) => {
   await seedApiKey(page);
   await mockAnthropic(page);
 
-  await page.goto('/upload');
+  await page.goto('/#/upload');
   await page.getByTestId('upload-title-input').fill('Mon Comic');
   await page.getByTestId('page-file-input').setInputFiles({
     name: 'p1.png',
@@ -72,7 +72,7 @@ test('library persists uploaded comics across reloads', async ({ page }) => {
   await page.getByTestId('upload-submit-btn').click();
   await expect(page).toHaveURL(/\/comics\/\d+/);
 
-  await page.goto('/library');
+  await page.goto('/#/library');
   await expect(page.getByTestId('comic-card')).toHaveCount(1);
   await expect(page.getByText('Mon Comic')).toBeVisible();
 
