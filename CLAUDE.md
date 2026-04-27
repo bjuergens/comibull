@@ -40,14 +40,15 @@ Use consistently in code, commits, and logging.
 
 - **Frontend**: React 19, Mantine UI 9, Vite, TypeScript
 - **Storage**: IndexedDB (via `idb`) for comics/pages/AI-cache/call-log; localStorage for preferences + API key
-- **AI**: Anthropic Messages API called directly from the browser (`anthropic-dangerous-direct-browser-access: true`). User brings their own key.
+- **OCR**: Tesseract.js runs in-browser for the detect step (bboxes + text). No API key, no API spend; language data downloaded on first use.
+- **AI**: Anthropic Messages API called directly from the browser (`anthropic-dangerous-direct-browser-access: true`) for the analyze step. User brings their own key.
 - **Testing**: Vitest (unit), ESLint, TypeScript
 - **Build tools**: bun
 - **Hosting**: static `dist/` deployed to GitHub Pages under `/comibull/branch/<branch>/`. Pushes to `main` land at `/branch/main/` (canonical app URL); same-repo PRs land at `/branch/<head_ref>/` for previews. The repo root (`/comibull/`) is a meta-refresh redirect to `/branch/main/`. Fork PRs skip deploy (no write token).
 
 ## Architecture
 
-- Two-step AI pipeline per page: **detect** (Vision call → bboxes + OCR text) → **analyze** (text call → vocab/grammar/translation). Both run synchronously in the browser.
+- Two-step pipeline per page: **detect** (Tesseract.js → bboxes + OCR text, fully local) → **analyze** (Anthropic text call → vocab/grammar/translation). Both run synchronously in the browser.
 - Content-addressed AI cache in IndexedDB: identical input → same cached response, no re-spend.
 - No auth, no sessions, no accounts. Any user of the browser profile is the user.
 - Debug mode is a single localStorage toggle in Settings.
@@ -79,7 +80,7 @@ Static SPA. `bun run build` produces `frontend/dist/`. CI deploys it to GitHub P
 
 - Don't re-introduce a backend or a custom-server deployment. Hosting is GitHub Pages, period. If something needs a backend, talk about it first.
 - Don't store the user's API key anywhere except localStorage. Don't send it anywhere except Anthropic.
-- Don't fetch anything from a server other than `api.anthropic.com`.
+- Don't fetch anything from a server other than `api.anthropic.com` and the Tesseract.js CDN (worker + language data, fetched once and cached).
 - Don't add UUIDs or account concepts.
 - Don't create PRs — just push to the branch. The human creates PRs.
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { showError } from '../notifications';
-import { analyzeRegions, detectPage, AnthropicError, MissingApiKeyError } from '../anthropic';
+import { analyzeRegions, AnthropicError, MissingApiKeyError } from '../anthropic';
+import { detectPage } from '../tesseract';
 import { getComic, getPage, listPages, updatePage } from '../store';
 import type { Bbox, ComicDetail, PageItem, Region } from './comic-detail';
 import { buildComicDetail, isPageAnalyzed, isPageProcessing } from './comic-detail';
@@ -52,7 +53,7 @@ export function usePageOperations(id: string | undefined, currentPageIdx: number
     try {
       const row = await getPage(pageId);
       if (!row) return;
-      let nextRegions = await detectPage(row.image, sourceLanguage, pageId);
+      let nextRegions = await detectPage(row.image, sourceLanguage);
       if (doAnalyze && nextRegions.length > 0) {
         nextRegions = await analyzeRegions(nextRegions, sourceLanguage, pageId);
       }

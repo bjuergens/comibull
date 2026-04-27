@@ -45,9 +45,9 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }
 
-const CALL_TYPES: AiCallType[] = ['detect', 'analyze'];
+// Detect runs locally via Tesseract.js — only the analyze step picks an Anthropic model.
+const CALL_TYPES: AiCallType[] = ['analyze'];
 const CALL_TYPE_LABEL: Record<AiCallType, string> = {
-  detect: 'Erkennung + OCR (Vision)',
   analyze: 'Sprachanalyse (Text)',
 };
 
@@ -64,7 +64,6 @@ export default function SettingsPage() {
   const [debugMode, setDebugModeState] = useState(() => readDebugMode());
   const [testing, setTesting] = useState(false);
   const [modelFor, setModelFor] = useState<Record<AiCallType, string>>(() => ({
-    detect: getEffectiveModelConfig('detect').model,
     analyze: getEffectiveModelConfig('analyze').model,
   }));
 
@@ -118,7 +117,6 @@ export default function SettingsPage() {
   function handleResetModels() {
     resetModelConfig();
     setModelFor({
-      detect: getEffectiveModelConfig('detect').model,
       analyze: getEffectiveModelConfig('analyze').model,
     });
   }

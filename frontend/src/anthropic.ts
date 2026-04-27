@@ -16,8 +16,6 @@ import {
   analyzeResponseSchema,
   DEFAULT_AI_CONFIG,
   DEFAULT_SOURCE_LANGUAGE,
-  DETECT_PROMPT,
-  detectResponseSchema,
   LANGUAGE_LABELS,
   SYSTEM_PROMPT,
   TARGET_LANGUAGE_NAME,
@@ -27,7 +25,6 @@ import {
   type AiCallType,
 } from './shared-types';
 import { cacheLookup, cacheStore, logCall } from './store';
-import { assertWebpBlob } from './image-conversion';
 import { readApiKey, readModelConfig } from './user-settings';
 
 export class AnthropicError extends Error {
@@ -42,8 +39,8 @@ export class MissingApiKeyError extends Error {
   }
 }
 
-// 2 minutes — the backend's anthropic_timeout_s default. Long enough for
-// vision calls on big pages, short enough that a hung request fails loudly.
+// 2 minutes — long enough for the analyze call on a chunky page, short enough
+// that a hung request fails loudly.
 const REQUEST_TIMEOUT_MS = 120_000;
 
 async function sha256Hex(s: string): Promise<string> {
@@ -52,19 +49,6 @@ async function sha256Hex(s: string): Promise<string> {
   return Array.from(new Uint8Array(hash))
     .map(b => b.toString(16).padStart(2, '0'))
     .join('');
-}
-
-async function blobToBase64(blob: Blob): Promise<string> {
-  const buf = await blob.arrayBuffer();
-  // btoa needs a binary string. Chunked spread avoids the
-  // String.fromCharCode(...big) stack-overflow trap on large images.
-  let bin = '';
-  const bytes = new Uint8Array(buf);
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(bin);
 }
 
 // Validates the /v1/messages envelope. The model-supplied `input` is left
@@ -90,7 +74,6 @@ interface CallArgs<S extends Type> {
   config: CallTypeConfig;
   system: string;
   prompt: string;
-  image?: { media_type: string; data: string };
   schema: S;
   page_id: number | null;
 }
@@ -143,20 +126,11 @@ async function callClaude<S extends Type>(args: CallArgs<S>): Promise<{
   const apiKey = readApiKey();
   if (!apiKey) throw new MissingApiKeyError();
 
-  const content: unknown[] = [];
-  if (args.image) {
-    content.push({
-      type: 'image',
-      source: { type: 'base64', media_type: args.image.media_type, data: args.image.data },
-    });
-  }
-  content.push({ type: 'text', text: args.prompt });
-
   const body = {
     model: args.config.model,
     max_tokens: args.config.max_tokens,
     system: args.system,
-    messages: [{ role: 'user', content }],
+    messages: [{ role: 'user', content: [{ type: 'text', text: args.prompt }] }],
     tools: [{
       name: STRUCTURED_TOOL_NAME,
       description: 'Submit the structured result. This is the only valid action.',
@@ -238,33 +212,6 @@ async function callClaude<S extends Type>(args: CallArgs<S>): Promise<{
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────
-
-export async function detectPage(
-  image: Blob,
-  source_language: SourceLanguage = DEFAULT_SOURCE_LANGUAGE,
-  page_id: number | null = null,
-): Promise<Region[]> {
-  const config = readModelConfig('detect') ?? DEFAULT_AI_CONFIG.detect;
-  const langName = LANGUAGE_LABELS[source_language].en;
-  assertWebpBlob(image);
-  const data = await blobToBase64(image);
-  const mediaType = 'image/webp';
-  const { parsed } = await callClaude({
-    call_type: 'detect',
-    config,
-    system: SYSTEM_PROMPT(langName),
-    prompt: DETECT_PROMPT(langName),
-    image: { media_type: mediaType, data },
-    schema: detectResponseSchema,
-    page_id,
-  });
-  return parsed.regions.map(r => ({
-    bbox: r.bbox,
-    ocr_text: r.ocr_text,
-    type: r.type,
-    source: 'anthropic',
-  }));
-}
 
 export async function analyzeRegions(
   regions: Region[],
