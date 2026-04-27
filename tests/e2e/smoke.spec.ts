@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { mockAnthropic, resetState, seedApiKey, TEST_PNG_BUFFER } from './helpers';
+import { mockAnthropic, mockTesseract, resetState, seedApiKey, TEST_PNG_BUFFER } from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await resetState(page);
@@ -29,6 +29,7 @@ test('Settings: saving an API key tests it and shows success', async ({ page }) 
 
 test('upload → analyze → region visible with translation', async ({ page }) => {
   await seedApiKey(page);
+  await mockTesseract(page);
   await mockAnthropic(page);
 
   // Upload page — pick one tiny PNG, submit.

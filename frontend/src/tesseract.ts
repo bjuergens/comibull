@@ -14,6 +14,15 @@ import {
   type SourceLanguage,
 } from './shared-types';
 
+// E2E test seam: when window.__tesseractDetectMock is set, calls bypass
+// Tesseract entirely. Avoids the language-data CDN fetch and the slow OCR run
+// in headless CI, where the tiny test fixture wouldn't yield text anyway.
+declare global {
+  interface Window {
+    __tesseractDetectMock?: (image: Blob, lang: SourceLanguage) => Promise<Region[]>;
+  }
+}
+
 // Tesseract trained-data codes — different from our 2-letter SourceLanguage.
 // https://tesseract-ocr.github.io/tessdoc/Data-Files-in-different-versions.html
 const TESSERACT_LANG: Record<SourceLanguage, string> = {
@@ -48,6 +57,9 @@ export async function detectPage(
   image: Blob,
   source_language: SourceLanguage = DEFAULT_SOURCE_LANGUAGE,
 ): Promise<Region[]> {
+  if (typeof window !== 'undefined' && window.__tesseractDetectMock) {
+    return window.__tesseractDetectMock(image, source_language);
+  }
   const worker = await getWorker(source_language);
   const { width, height } = await imageDimensions(image);
   const { data } = await worker.recognize(image, {}, { blocks: true });

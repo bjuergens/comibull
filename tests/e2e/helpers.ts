@@ -1,5 +1,13 @@
 import type { Page, Route } from '@playwright/test';
 
+// Region shape returned by the mocked detect step. Matches the subset used by
+// the test fixtures; full Region also has an optional analysis populated later.
+type DetectRegionFixture = {
+  bbox: [number, number, number, number];
+  ocr_text: string;
+  type?: string;
+};
+
 // 1x1 white PNG — valid image bytes, tiny on disk, good enough for <input type=file>.
 export const TEST_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII=';
@@ -13,16 +21,40 @@ export const TEST_PNG_BUFFER = Buffer.from(TEST_PNG_BASE64, 'base64');
 
 interface MockOptions {
   /** Regions the detect call should report. Defaults to one dialogue bubble. */
-  detectRegions?: { bbox: [number, number, number, number]; ocr_text: string; type?: string }[];
+  detectRegions?: DetectRegionFixture[];
   /** Translation string returned for region_index 0. Defaults to "Hallo!". */
   analyzeTranslation?: string;
   /** Override the overall behavior (e.g. to simulate errors). */
   onRequest?: (route: Route, body: unknown) => Promise<void> | void;
 }
 
-const DEFAULT_REGIONS = [
-  { bbox: [0.1, 0.1, 0.4, 0.3] as [number, number, number, number], ocr_text: 'Bonjour !', type: 'dialogue' },
+const DEFAULT_REGIONS: DetectRegionFixture[] = [
+  { bbox: [0.1, 0.1, 0.4, 0.3], ocr_text: 'Bonjour !', type: 'dialogue' },
 ];
+
+// Stub the Tesseract.js detect step. Skips the CDN language-data fetch and
+// the OCR run, which would yield zero regions on the 1x1 test fixture anyway.
+// See src/tesseract.ts for the matching `__tesseractDetectMock` seam.
+//
+// Same shape as seedApiKey: addInitScript for post-reload, evaluate for the
+// already-loaded page (HashRouter never triggers a real navigation after the
+// initial goto in resetState).
+export async function mockTesseract(
+  page: Page,
+  regions: DetectRegionFixture[] = DEFAULT_REGIONS,
+): Promise<void> {
+  const install = (rs: DetectRegionFixture[]) => {
+    (window as unknown as { __tesseractDetectMock: unknown }).__tesseractDetectMock =
+      async () => rs.map(r => ({
+        bbox: r.bbox,
+        ocr_text: r.ocr_text,
+        type: r.type,
+        source: 'tesseract',
+      }));
+  };
+  await page.addInitScript(install, regions);
+  await page.evaluate(install, regions);
+}
 
 export async function mockAnthropic(page: Page, opts: MockOptions = {}): Promise<void> {
   const detectRegions = opts.detectRegions ?? DEFAULT_REGIONS;
