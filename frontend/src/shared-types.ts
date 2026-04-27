@@ -65,6 +65,7 @@ export type PageStatus = typeof pageStatusSchema.infer;
 export const userSettingsSchema = type({
   canEditTextboxes: 'boolean',
   defaultLanguage: sourceLanguageSchema,
+  webpQuality: '1 <= number.integer <= 100',
   '+': 'reject',
 });
 export type UserSettings = typeof userSettingsSchema.infer;
@@ -72,6 +73,7 @@ export type UserSettings = typeof userSettingsSchema.infer;
 export const DEFAULT_USER_SETTINGS: UserSettings = {
   canEditTextboxes: false,
   defaultLanguage: 'fr',
+  webpQuality: 50,
 };
 
 export const aiCallTypeSchema = type("'detect' | 'analyze'");

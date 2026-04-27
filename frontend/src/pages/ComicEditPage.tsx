@@ -35,11 +35,14 @@ import {
   type ComicDetail,
   type PageItem,
 } from './comic-detail';
+import { toWebp } from '../image-conversion';
+import { useSettings } from '../SettingsContext';
 import { LANGUAGE_LABELS } from '../shared-types';
 
 export default function ComicEditPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { settings } = useSettings();
   // Number(undefined) === NaN, so this handles both "no id" and "garbage id".
   const idNum = Number(id);
   const [comic, setComic] = useState<ComicDetail | null>(null);
@@ -93,7 +96,8 @@ export default function ComicEditPage() {
     if (Number.isNaN(idNum) || uploadFiles.length === 0) return;
     setUploading(true);
     try {
-      await addPages(idNum, uploadFiles);
+      const webpFiles = await Promise.all(uploadFiles.map(f => toWebp(f, settings.webpQuality)));
+      await addPages(idNum, webpFiles);
       setUploadFiles([]);
       await fetchComic();
     } finally {
