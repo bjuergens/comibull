@@ -1,18 +1,22 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
+  Anchor,
   Badge,
   Button,
   Container,
   Divider,
   Group,
+  List,
   NumberInput,
   PasswordInput,
   Select,
+  Spoiler,
   Stack,
   Switch,
   Table,
   Text,
+  TextInput,
   Title,
 } from '@mantine/core';
 import { useLayoutContext } from '../components/AppLayout';
@@ -20,19 +24,28 @@ import { useSettings } from '../SettingsContext';
 import {
   clearAllSettingsExceptApiKey,
   clearApiKey,
+  clearGoogleApiKey,
   getEffectiveModelConfig,
   readApiKey,
   readDebugMode,
+  readGoogleApiKey,
   resetModelConfig,
   writeApiKey,
   writeDebugMode,
+  writeGoogleApiKey,
   writeModelConfig,
 } from '../user-settings';
 import { testApiKey, AnthropicError } from '../anthropic';
+import { testGoogleApiKey, GoogleVisionError } from '../google-vision';
 import {
   ALLOWED_AI_MODELS,
+  ALLOWED_PROVIDERS_FOR,
   type AiCallType,
+  type AiProvider,
+  type CallTypeConfig,
+  GOOGLE_VISION_MODEL_ID,
   LANGUAGE_LABELS,
+  PROVIDER_LABEL,
   SOURCE_LANGUAGES,
 } from '../shared-types';
 import { cacheClear, clearAll, listCallLog, storageStats, type CallLogEntry } from '../store';
@@ -61,12 +74,18 @@ export default function SettingsPage() {
   const { settings, setSetting } = useSettings();
 
   const [apiKey, setApiKey] = useState(() => readApiKey() ?? '');
+  const [googleKey, setGoogleKey] = useState(() => readGoogleApiKey() ?? '');
   const [debugMode, setDebugModeState] = useState(() => readDebugMode());
   const [testing, setTesting] = useState(false);
-  const [modelFor, setModelFor] = useState<Record<AiCallType, string>>(() => ({
-    detect: getEffectiveModelConfig('detect').model,
-    analyze: getEffectiveModelConfig('analyze').model,
-  }));
+  const [testingGoogle, setTestingGoogle] = useState(false);
+  const [cfgFor, setCfgFor] = useState<Record<AiCallType, { provider: AiProvider; model: string }>>(() => {
+    const d = getEffectiveModelConfig('detect');
+    const a = getEffectiveModelConfig('analyze');
+    return {
+      detect: { provider: d.provider ?? 'anthropic', model: d.model },
+      analyze: { provider: a.provider ?? 'anthropic', model: a.model },
+    };
+  });
 
   const [stats, setStats] = useState<{ comics: number; pages: number; cache: number; logs: number; bytes: number } | null>(null);
   const [log, setLog] = useState<CallLogEntry[]>([]);
@@ -109,17 +128,60 @@ export default function SettingsPage() {
     setApiKey('');
   }
 
-  function handleModelChange(call_type: AiCallType, model: string) {
+  async function handleSaveGoogleKey() {
+    if (!googleKey.trim()) return;
+    setTestingGoogle(true);
+    try {
+      await testGoogleApiKey(googleKey.trim());
+      writeGoogleApiKey(googleKey.trim());
+      showSuccess('Google-API-Schlüssel gespeichert', 'Der Schlüssel funktioniert.');
+    } catch (err) {
+      if (err instanceof GoogleVisionError) showError('Schlüssel ungültig', err.message);
+      else showError('Test fehlgeschlagen', err instanceof Error ? err.message : 'Unbekannter Fehler');
+    } finally {
+      setTestingGoogle(false);
+    }
+  }
+
+  function handleClearGoogleKey() {
+    clearGoogleApiKey();
+    setGoogleKey('');
+  }
+
+  function persistConfig(call_type: AiCallType, next: { provider: AiProvider; model: string }) {
     const current = getEffectiveModelConfig(call_type);
-    writeModelConfig(call_type, { ...current, model });
-    setModelFor(prev => ({ ...prev, [call_type]: model }));
+    const merged: CallTypeConfig = { ...current, model: next.model, provider: next.provider };
+    writeModelConfig(call_type, merged);
+    setCfgFor(prev => ({ ...prev, [call_type]: next }));
+  }
+
+  function handleProviderChange(call_type: AiCallType, provider: AiProvider) {
+    // Switching to Google for detect: pin the sentinel model id so the call
+    // log shows something coherent. Switching back to Anthropic: restore
+    // a sensible Claude model (the previous one if it was a Claude id, else
+    // the default).
+    let model = cfgFor[call_type].model;
+    if (provider === 'google') {
+      model = GOOGLE_VISION_MODEL_ID;
+    } else if (model === GOOGLE_VISION_MODEL_ID) {
+      model = getEffectiveModelConfig(call_type).model === GOOGLE_VISION_MODEL_ID
+        ? (ALLOWED_AI_MODELS[1]?.id ?? ALLOWED_AI_MODELS[0]!.id)
+        : getEffectiveModelConfig(call_type).model;
+    }
+    persistConfig(call_type, { provider, model });
+  }
+
+  function handleModelChange(call_type: AiCallType, model: string) {
+    persistConfig(call_type, { ...cfgFor[call_type], model });
   }
 
   function handleResetModels() {
     resetModelConfig();
-    setModelFor({
-      detect: getEffectiveModelConfig('detect').model,
-      analyze: getEffectiveModelConfig('analyze').model,
+    const d = getEffectiveModelConfig('detect');
+    const a = getEffectiveModelConfig('analyze');
+    setCfgFor({
+      detect: { provider: d.provider ?? 'anthropic', model: d.model },
+      analyze: { provider: a.provider ?? 'anthropic', model: a.model },
     });
   }
 
@@ -143,7 +205,7 @@ export default function SettingsPage() {
       <Stack gap="xl">
         <Title order={2}>Einstellungen</Title>
 
-        {/* API Key */}
+        {/* Anthropic API Key */}
         <section>
           <Title order={4} mb="xs">Anthropic-API-Schlüssel</Title>
           <Stack gap="xs">
@@ -166,6 +228,70 @@ export default function SettingsPage() {
                 Entfernen
               </Button>
             </Group>
+          </Stack>
+        </section>
+
+        <Divider />
+
+        {/* Google Vision API Key — optional alternative OCR provider */}
+        <section>
+          <Title order={4} mb="xs">Google-Cloud-Vision-API-Schlüssel (optional)</Title>
+          <Stack gap="xs">
+            <Text size="sm" c="dimmed">
+              Alternative für die Erkennung + OCR. Wird nur verwendet, wenn unten als Anbieter
+              für „Erkennung + OCR" Google Cloud Vision ausgewählt ist.
+            </Text>
+            <PasswordInput
+              label="Google-API-Schlüssel"
+              placeholder="AIza..."
+              value={googleKey}
+              onChange={(e) => setGoogleKey(e.currentTarget.value)}
+            />
+            <Group>
+              <Button onClick={() => { void handleSaveGoogleKey(); }} loading={testingGoogle} disabled={!googleKey.trim()}>
+                Speichern &amp; Testen
+              </Button>
+              <Button variant="subtle" color="red" onClick={handleClearGoogleKey} disabled={!googleKey}>
+                Entfernen
+              </Button>
+            </Group>
+            <Spoiler maxHeight={0} showLabel="Wie bekomme ich diesen Schlüssel?" hideLabel="Ausblenden">
+              <Stack gap={4} mt="xs">
+                <List size="sm" type="ordered" spacing={2}>
+                  <List.Item>
+                    Bei der{' '}
+                    <Anchor href="https://console.cloud.google.com/" target="_blank" rel="noopener">
+                      Google Cloud Console
+                    </Anchor>{' '}
+                    anmelden.
+                  </List.Item>
+                  <List.Item>Projekt erstellen oder ein bestehendes auswählen.</List.Item>
+                  <List.Item>
+                    <Anchor
+                      href="https://console.cloud.google.com/apis/library/vision.googleapis.com"
+                      target="_blank"
+                      rel="noopener"
+                    >
+                      Cloud Vision API aktivieren
+                    </Anchor>
+                    .
+                  </List.Item>
+                  <List.Item>
+                    Unter „APIs &amp; Services" → „Credentials" einen neuen API-Schlüssel erstellen.
+                  </List.Item>
+                  <List.Item>
+                    Optional: Schlüssel auf die Cloud Vision API beschränken (API restrictions).
+                  </List.Item>
+                  <List.Item>
+                    Hinweis: HTTP-Referrer-Beschränkungen funktionieren <Text span fw={600}>nicht</Text>{' '}
+                    bei Aufrufen aus dem Browser. Lasse die Application restrictions auf „None" oder verwende IP-Beschränkungen.
+                  </List.Item>
+                  <List.Item>
+                    Abrechnung: Erste 1000 Aufrufe pro Monat sind kostenlos, danach kostenpflichtig.
+                  </List.Item>
+                </List>
+              </Stack>
+            </Spoiler>
           </Stack>
         </section>
 
@@ -204,24 +330,47 @@ export default function SettingsPage() {
 
         <Divider />
 
-        {/* Model picker */}
+        {/* Model & provider picker */}
         <section>
           <Group justify="space-between" mb="xs">
-            <Title order={4}>KI-Modelle</Title>
+            <Title order={4}>KI-Pipeline pro Schritt</Title>
             <Button variant="subtle" size="compact-xs" onClick={handleResetModels}>
               Zurücksetzen
             </Button>
           </Group>
-          <Stack gap="sm">
-            {CALL_TYPES.map(ct => (
-              <Select
-                key={ct}
-                label={CALL_TYPE_LABEL[ct]}
-                data={ALLOWED_AI_MODELS.map(m => ({ value: m.id, label: m.label }))}
-                value={modelFor[ct]}
-                onChange={(v) => { if (v) handleModelChange(ct, v); }}
-              />
-            ))}
+          <Stack gap="md">
+            {CALL_TYPES.map(ct => {
+              const providers = ALLOWED_PROVIDERS_FOR[ct];
+              const isGoogle = cfgFor[ct].provider === 'google';
+              return (
+                <Stack key={ct} gap="xs">
+                  <Text fw={500}>{CALL_TYPE_LABEL[ct]}</Text>
+                  {providers.length > 1 && (
+                    <Select
+                      label="Anbieter"
+                      data={providers.map(p => ({ value: p, label: PROVIDER_LABEL[p] }))}
+                      value={cfgFor[ct].provider}
+                      onChange={(v) => { if (v === 'anthropic' || v === 'google') handleProviderChange(ct, v); }}
+                    />
+                  )}
+                  {isGoogle ? (
+                    <TextInput
+                      label="Modell"
+                      value="DOCUMENT_TEXT_DETECTION"
+                      readOnly
+                      description="Google Vision verwendet ein festes OCR-Modell."
+                    />
+                  ) : (
+                    <Select
+                      label="Modell"
+                      data={ALLOWED_AI_MODELS.map(m => ({ value: m.id, label: m.label }))}
+                      value={cfgFor[ct].model}
+                      onChange={(v) => { if (v) handleModelChange(ct, v); }}
+                    />
+                  )}
+                </Stack>
+              );
+            })}
           </Stack>
         </section>
 
@@ -260,6 +409,7 @@ export default function SettingsPage() {
                 <Table.Tr>
                   <Table.Th>Zeit</Table.Th>
                   <Table.Th>Typ</Table.Th>
+                  <Table.Th>Anbieter</Table.Th>
                   <Table.Th>Modell</Table.Th>
                   <Table.Th>Input</Table.Th>
                   <Table.Th>Output</Table.Th>
@@ -273,6 +423,7 @@ export default function SettingsPage() {
                       {entry.call_type}
                       {entry.cache_hit && <Badge size="xs" color="teal" variant="light" ml={4}>cache</Badge>}
                     </Table.Td>
+                    <Table.Td>{entry.provider ?? 'anthropic'}</Table.Td>
                     <Table.Td>{entry.model}</Table.Td>
                     <Table.Td>{entry.input_tokens}</Table.Td>
                     <Table.Td>{entry.output_tokens}</Table.Td>

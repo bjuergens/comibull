@@ -29,6 +29,7 @@ import {
 import { cacheLookup, cacheStore, logCall } from './store';
 import { assertWebpBlob } from './image-conversion';
 import { readApiKey, readModelConfig } from './user-settings';
+import { detectPageWithGoogleVision } from './google-vision';
 
 export class AnthropicError extends Error {
   constructor(public status: number, message: string) {
@@ -175,6 +176,7 @@ async function callClaude<S extends Type>(args: CallArgs<S>): Promise<{
     // cache_hit=true marks this row as savings, not real spend.
     await logCall({
       call_type: args.call_type,
+      provider: 'anthropic',
       model: args.config.model,
       input_tokens: hit.input_tokens,
       output_tokens: hit.output_tokens,
@@ -227,6 +229,7 @@ async function callClaude<S extends Type>(args: CallArgs<S>): Promise<{
   });
   await logCall({
     call_type: args.call_type,
+    provider: 'anthropic',
     model: args.config.model,
     input_tokens: tokens.input,
     output_tokens: tokens.output,
@@ -239,10 +242,10 @@ async function callClaude<S extends Type>(args: CallArgs<S>): Promise<{
 
 // ─── Public API ──────────────────────────────────────────────────────────
 
-export async function detectPage(
+async function detectPageWithAnthropic(
   image: Blob,
-  source_language: SourceLanguage = DEFAULT_SOURCE_LANGUAGE,
-  page_id: number | null = null,
+  source_language: SourceLanguage,
+  page_id: number | null,
 ): Promise<Region[]> {
   const config = readModelConfig('detect') ?? DEFAULT_AI_CONFIG.detect;
   const langName = LANGUAGE_LABELS[source_language].en;
@@ -264,6 +267,21 @@ export async function detectPage(
     type: r.type,
     source: 'anthropic',
   }));
+}
+
+// Dispatcher. Routes to whichever provider the user picked for the detect
+// step in Settings. Public signature unchanged from before the multi-provider
+// refactor so callers (usePageOperations) don't care.
+export async function detectPage(
+  image: Blob,
+  source_language: SourceLanguage = DEFAULT_SOURCE_LANGUAGE,
+  page_id: number | null = null,
+): Promise<Region[]> {
+  const config = readModelConfig('detect') ?? DEFAULT_AI_CONFIG.detect;
+  if (config.provider === 'google') {
+    return detectPageWithGoogleVision(image, page_id);
+  }
+  return detectPageWithAnthropic(image, source_language, page_id);
 }
 
 export async function analyzeRegions(

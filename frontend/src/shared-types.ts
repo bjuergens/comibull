@@ -79,9 +79,19 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
 export const aiCallTypeSchema = type("'detect' | 'analyze'");
 export type AiCallType = typeof aiCallTypeSchema.infer;
 
+export const aiProviderSchema = type("'anthropic' | 'google'");
+export type AiProvider = typeof aiProviderSchema.infer;
+
+// Sentinel "model" for the Google Vision detect path. Stored in CallTypeConfig
+// when provider='google' so the call log row has something coherent to display.
+export const GOOGLE_VISION_MODEL_ID = 'google-vision-document-text-detection';
+
 export const callTypeConfigSchema = type({
   model: 'string',
   max_tokens: 'number.integer > 0',
+  // Optional so previously-saved configs (without provider) still parse.
+  // Only meaningful for the detect step; ignored for analyze.
+  'provider?': aiProviderSchema,
   '+': 'reject',
 });
 export type CallTypeConfig = typeof callTypeConfigSchema.infer;
@@ -99,14 +109,26 @@ export const ALLOWED_AI_MODELS: { id: string; label: string }[] = [
   { id: 'claude-opus-4-7', label: 'Opus 4.7' },
 ];
 
+// Which providers each pipeline step supports. Detect can route through
+// Google Vision; analyze is text-only linguistic reasoning, Anthropic-only.
+export const ALLOWED_PROVIDERS_FOR: Record<AiCallType, AiProvider[]> = {
+  detect: ['anthropic', 'google'],
+  analyze: ['anthropic'],
+};
+
+export const PROVIDER_LABEL: Record<AiProvider, string> = {
+  anthropic: 'Anthropic (Claude)',
+  google: 'Google Cloud Vision',
+};
+
 // Detect pulls scene context + bboxes + OCR text in one vision call; analyze
 // produces linguistic analysis from the OCR'd texts in a text-only call.
 // Reasonable defaults for a BYO-key user: Sonnet for the vision-heavy detect
 // step (more accurate at finding small bubbles), Haiku for the cheap text-only
 // analysis step.
 export const DEFAULT_AI_CONFIG: Record<AiCallType, CallTypeConfig> = {
-  detect: { model: 'claude-sonnet-4-6', max_tokens: 4096 },
-  analyze: { model: 'claude-haiku-4-5-20251001', max_tokens: 4096 },
+  detect: { model: 'claude-sonnet-4-6', max_tokens: 4096, provider: 'anthropic' },
+  analyze: { model: 'claude-haiku-4-5-20251001', max_tokens: 4096, provider: 'anthropic' },
 };
 
 // ─── Prompts (ported from backend/app/prompts/*.txt) ────────────────────────

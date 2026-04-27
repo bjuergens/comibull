@@ -8,6 +8,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type {
   AiCallType,
+  AiProvider,
   PageStatus,
   Region,
   SourceLanguage,
@@ -45,6 +46,9 @@ export interface CacheEntry {
 export interface CallLogEntry {
   id?: number;
   call_type: AiCallType;
+  // Optional for forwards compat with rows logged before the multi-provider
+  // refactor. Readers should treat absent as 'anthropic'.
+  provider?: AiProvider;
   model: string;
   input_tokens: number;
   output_tokens: number;
