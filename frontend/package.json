@@ -19,6 +19,7 @@
     "@panzoom/panzoom": "^4.6.1",
     "arktype": "^2.2.0",
     "idb": "^8.0.0",
+    "pdfjs-dist": "^5.7.284",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.13.2"

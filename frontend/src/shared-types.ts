@@ -74,9 +74,15 @@ export const userSettingsSchema = type({
   // Read sites apply defaults via ?? .
   'googleVisionGranularity?': googleVisionGranularitySchema,
   'googleVisionMergeCloseBoxes?': 'boolean',
+  // pdfjs viewport scale for PDF uploads. 1.0 = native 72dpi (way too small
+  // for a comic page); 2.0 ≈ 144dpi, our default. Optional for the same
+  // reason as the Google-Vision fields above.
+  'pdfRenderScale?': '0.5 <= number <= 6',
   '+': 'reject',
 });
 export type UserSettings = typeof userSettingsSchema.infer;
+
+export const DEFAULT_PDF_RENDER_SCALE = 2;
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
   canEditTextboxes: false,
@@ -84,6 +90,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   webpQuality: 50,
   googleVisionGranularity: 'paragraphs',
   googleVisionMergeCloseBoxes: false,
+  pdfRenderScale: DEFAULT_PDF_RENDER_SCALE,
 };
 
 export const aiCallTypeSchema = type("'detect' | 'analyze'");
