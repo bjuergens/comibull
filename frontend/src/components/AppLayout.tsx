@@ -40,7 +40,7 @@ export default function AppLayout() {
           aria-label={readerHeaderOpen ? 'Kopfzeile ausblenden' : 'Kopfzeile einblenden'}
           style={{
             position: 'fixed',
-            top: 4,
+            top: readerHeaderOpen ? 54 : 4,
             right: 4,
             zIndex: 'var(--mantine-z-index-modal)',
           }}
