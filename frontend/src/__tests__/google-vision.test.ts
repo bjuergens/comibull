@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   cacheStore: vi.fn(),
   logCall: vi.fn(),
   readGoogleApiKey: vi.fn(),
+  readUserSettings: vi.fn(),
 }));
 
 vi.mock('../store', () => ({
@@ -15,6 +16,7 @@ vi.mock('../store', () => ({
 
 vi.mock('../user-settings', () => ({
   readGoogleApiKey: mocks.readGoogleApiKey,
+  readUserSettings: mocks.readUserSettings,
 }));
 
 // detectPageWithGoogleVision needs to decode image dimensions and to skip
@@ -26,8 +28,10 @@ vi.mock('../image-conversion', () => ({
 import {
   detectPageWithGoogleVision,
   mapVisionResponseToRegions,
+  mergeCloseRegions,
   type GoogleVisionAnnotateResponse,
 } from '../google-vision';
+import type { Region } from '../shared-types';
 
 // A minimal Vision response covering bbox normalization, paragraph text
 // concatenation with break types, and an empty paragraph.
@@ -109,6 +113,118 @@ describe('mapVisionResponseToRegions', () => {
     expect(mapVisionResponseToRegions({ responses: [{}] }, 100, 100)).toEqual([]);
     expect(mapVisionResponseToRegions({}, 100, 100)).toEqual([]);
   });
+
+  it("granularity='blocks': emits one region per block, joining its paragraphs", () => {
+    const resp: GoogleVisionAnnotateResponse = {
+      responses: [{
+        fullTextAnnotation: {
+          pages: [{
+            blocks: [{
+              boundingBox: {
+                vertices: [
+                  { x: 10, y: 10 },
+                  { x: 100, y: 10 },
+                  { x: 100, y: 80 },
+                  { x: 10, y: 80 },
+                ],
+              },
+              paragraphs: [
+                {
+                  boundingBox: { vertices: [{ x: 10, y: 10 }, { x: 100, y: 30 }] },
+                  words: [{ symbols: [{ text: 'A' }] }],
+                },
+                {
+                  boundingBox: { vertices: [{ x: 10, y: 50 }, { x: 100, y: 80 }] },
+                  words: [{ symbols: [{ text: 'B' }] }],
+                },
+              ],
+            }],
+          }],
+        },
+      }],
+    };
+    const regions = mapVisionResponseToRegions(resp, 200, 100, 'blocks');
+    expect(regions).toHaveLength(1);
+    expect(regions[0]?.bbox).toEqual([10 / 200, 10 / 100, 100 / 200, 80 / 100]);
+    expect(regions[0]?.ocr_text).toBe('A\nB');
+  });
+
+  it('skips non-text blocks (PICTURE, RULER, BARCODE)', () => {
+    const resp: GoogleVisionAnnotateResponse = {
+      responses: [{
+        fullTextAnnotation: {
+          pages: [{
+            blocks: [{
+              blockType: 'PICTURE',
+              boundingBox: { vertices: [{ x: 0, y: 0 }, { x: 50, y: 50 }] },
+              paragraphs: [{
+                boundingBox: { vertices: [{ x: 0, y: 0 }, { x: 50, y: 50 }] },
+                words: [{ symbols: [{ text: 'noise' }] }],
+              }],
+            }],
+          }],
+        },
+      }],
+    };
+    expect(mapVisionResponseToRegions(resp, 100, 100, 'paragraphs')).toEqual([]);
+    expect(mapVisionResponseToRegions(resp, 100, 100, 'blocks')).toEqual([]);
+  });
+});
+
+describe('mergeCloseRegions', () => {
+  function r(bbox: [number, number, number, number], text: string): Region {
+    return { bbox, ocr_text: text, type: 'other', source: 'google' };
+  }
+
+  it('merges two vertically-close, horizontally-aligned regions', () => {
+    // Two stacked lines inside the same speech bubble.
+    // Heights: 0.05 each → avgH = 0.05, vGapThreshold = 0.025.
+    // Vertical gap = 0.16 - 0.15 = 0.01 < 0.025 ✓
+    // Both bboxes fully overlap horizontally ✓
+    const merged = mergeCloseRegions([
+      r([0.10, 0.10, 0.40, 0.15], 'first line'),
+      r([0.10, 0.16, 0.40, 0.21], 'second line'),
+    ]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.ocr_text).toBe('first line\nsecond line');
+    expect(merged[0]?.bbox).toEqual([0.10, 0.10, 0.40, 0.21]);
+  });
+
+  it('does NOT merge regions with too large a vertical gap', () => {
+    // avgH = 0.05, threshold = 0.025. Gap = 0.50 - 0.15 = 0.35.
+    const out = mergeCloseRegions([
+      r([0.10, 0.10, 0.40, 0.15], 'top'),
+      r([0.10, 0.50, 0.40, 0.55], 'bottom'),
+    ]);
+    expect(out).toHaveLength(2);
+  });
+
+  it('does NOT merge side-by-side regions with low x-overlap', () => {
+    // Vertically adjacent but horizontally disjoint (different bubbles).
+    const out = mergeCloseRegions([
+      r([0.10, 0.10, 0.30, 0.15], 'left'),
+      r([0.60, 0.16, 0.80, 0.21], 'right'),
+    ]);
+    expect(out).toHaveLength(2);
+  });
+
+  it('cascades: three close regions all merge into one', () => {
+    // avgH = 0.05, threshold = 0.025. All gaps small, full x-overlap.
+    const out = mergeCloseRegions([
+      r([0.10, 0.10, 0.40, 0.15], 'one'),
+      r([0.10, 0.16, 0.40, 0.21], 'two'),
+      r([0.10, 0.22, 0.40, 0.27], 'three'),
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]?.ocr_text).toBe('one\ntwo\nthree');
+    expect(out[0]?.bbox).toEqual([0.10, 0.10, 0.40, 0.27]);
+  });
+
+  it('passes through empty / single inputs unchanged', () => {
+    expect(mergeCloseRegions([])).toEqual([]);
+    const single = [r([0, 0, 0.1, 0.1], 'x')];
+    expect(mergeCloseRegions(single)).toEqual(single);
+  });
 });
 
 describe('detectPageWithGoogleVision', () => {
@@ -117,7 +233,15 @@ describe('detectPageWithGoogleVision', () => {
     mocks.cacheStore.mockReset();
     mocks.logCall.mockReset();
     mocks.readGoogleApiKey.mockReset();
+    mocks.readUserSettings.mockReset();
     mocks.readGoogleApiKey.mockReturnValue('AIzaTest');
+    mocks.readUserSettings.mockReturnValue({
+      canEditTextboxes: false,
+      defaultLanguage: 'fr',
+      webpQuality: 50,
+      googleVisionGranularity: 'paragraphs',
+      googleVisionMergeCloseBoxes: false,
+    });
 
     vi.stubGlobal('fetch', vi.fn());
     // createImageBitmap doesn't exist in jsdom — provide a stub.

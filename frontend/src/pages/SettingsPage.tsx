@@ -354,12 +354,38 @@ export default function SettingsPage() {
                     />
                   )}
                   {isGoogle ? (
-                    <TextInput
-                      label="Modell"
-                      value="DOCUMENT_TEXT_DETECTION"
-                      readOnly
-                      description="Google Vision verwendet ein festes OCR-Modell."
-                    />
+                    <>
+                      <TextInput
+                        label="Modell"
+                        value="DOCUMENT_TEXT_DETECTION"
+                        readOnly
+                        description="Google Vision verwendet ein festes OCR-Modell."
+                      />
+                      {ct === 'detect' && (
+                        <>
+                          <Select
+                            label="Granularität"
+                            description="Absätze: feinkörnig (Standard). Blöcke: gröber, kombiniert benachbarte Absätze."
+                            data={[
+                              { value: 'paragraphs', label: 'Absätze (Paragraphs)' },
+                              { value: 'blocks', label: 'Blöcke (Blocks)' },
+                            ]}
+                            value={settings.googleVisionGranularity ?? 'paragraphs'}
+                            onChange={(v) => {
+                              if (v === 'paragraphs' || v === 'blocks') {
+                                setSetting('googleVisionGranularity', v);
+                              }
+                            }}
+                          />
+                          <Switch
+                            label="Nahe Boxen zusammenführen"
+                            description="Klebt Boxen zusammen, die vertikal nah beieinander liegen und horizontal überlappen — typisch mehrzeiliger Sprechblasentext."
+                            checked={settings.googleVisionMergeCloseBoxes ?? false}
+                            onChange={(e) => setSetting('googleVisionMergeCloseBoxes', e.currentTarget.checked)}
+                          />
+                        </>
+                      )}
+                    </>
                   ) : (
                     <Select
                       label="Modell"

@@ -10,11 +10,12 @@
 import { type } from 'arktype';
 import {
   GOOGLE_VISION_MODEL_ID,
+  type GoogleVisionGranularity,
   type Region,
 } from './shared-types';
 import { cacheLookup, cacheStore, logCall } from './store';
 import { assertWebpBlob } from './image-conversion';
-import { readGoogleApiKey } from './user-settings';
+import { readGoogleApiKey, readUserSettings } from './user-settings';
 
 export class GoogleVisionError extends Error {
   constructor(public status: number, message: string) {
@@ -109,6 +110,11 @@ const paragraphSchema = type({
 
 const blockSchema = type({
   'paragraphs?': paragraphSchema.array(),
+  'boundingBox?': type({
+    'vertices?': vertexSchema.array(),
+  }),
+  // TEXT, TABLE, PICTURE, RULER, BARCODE — we only emit Regions for TEXT.
+  'blockType?': "'TEXT' | 'TABLE' | 'PICTURE' | 'RULER' | 'BARCODE' | 'UNKNOWN'",
 });
 
 const pageSchema = type({
@@ -152,39 +158,130 @@ function paragraphToText(para: typeof paragraphSchema.infer): string {
   return out;
 }
 
+function verticesToNormalizedBbox(
+  verts: { x?: number; y?: number }[],
+  imageW: number,
+  imageH: number,
+): [number, number, number, number] | null {
+  if (verts.length < 2) return null;
+  const xs = verts.map(v => v.x ?? 0);
+  const ys = verts.map(v => v.y ?? 0);
+  return [
+    clamp01(Math.min(...xs) / imageW),
+    clamp01(Math.min(...ys) / imageH),
+    clamp01(Math.max(...xs) / imageW),
+    clamp01(Math.max(...ys) / imageH),
+  ];
+}
+
 export function mapVisionResponseToRegions(
   resp: GoogleVisionAnnotateResponse,
   imageW: number,
   imageH: number,
+  granularity: GoogleVisionGranularity = 'paragraphs',
 ): Region[] {
   const out: Region[] = [];
   const fta = resp.responses?.[0]?.fullTextAnnotation;
   if (!fta) return out;
   for (const page of fta.pages ?? []) {
     for (const block of page.blocks ?? []) {
-      for (const para of block.paragraphs ?? []) {
-        const text = paragraphToText(para).trim();
+      // Skip non-text blocks (PICTURE, RULER, BARCODE). TABLE is borderline
+      // — we keep it. Undefined blockType is treated as TEXT (older Vision
+      // versions didn't always emit it).
+      if (block.blockType && block.blockType !== 'TEXT' && block.blockType !== 'TABLE') continue;
+
+      if (granularity === 'blocks') {
+        const text = (block.paragraphs ?? [])
+          .map(p => paragraphToText(p).trim())
+          .filter(Boolean)
+          .join('\n');
         if (!text) continue;
-        const verts = para.boundingBox?.vertices ?? [];
-        if (verts.length < 2) continue;
-        const xs = verts.map(v => v.x ?? 0);
-        const ys = verts.map(v => v.y ?? 0);
-        out.push({
-          bbox: [
-            clamp01(Math.min(...xs) / imageW),
-            clamp01(Math.min(...ys) / imageH),
-            clamp01(Math.max(...xs) / imageW),
-            clamp01(Math.max(...ys) / imageH),
-          ],
-          ocr_text: text,
-          // Vision can't classify dialogue/narration/sfx — keep neutral.
-          type: 'other',
-          source: 'google',
-        });
+        const bbox = verticesToNormalizedBbox(block.boundingBox?.vertices ?? [], imageW, imageH);
+        if (!bbox) continue;
+        out.push({ bbox, ocr_text: text, type: 'other', source: 'google' });
+      } else {
+        for (const para of block.paragraphs ?? []) {
+          const text = paragraphToText(para).trim();
+          if (!text) continue;
+          const bbox = verticesToNormalizedBbox(para.boundingBox?.vertices ?? [], imageW, imageH);
+          if (!bbox) continue;
+          out.push({
+            bbox,
+            ocr_text: text,
+            // Vision can't classify dialogue/narration/sfx — keep neutral.
+            type: 'other',
+            source: 'google',
+          });
+        }
       }
     }
   }
   return out;
+}
+
+// Post-process: fold regions that look like fragments of the same speech
+// bubble back together. Vision often splits multi-line bubble text into
+// separate paragraphs — this stitches them back when their bboxes are
+// vertically close AND horizontally aligned.
+//
+// Rule: merge a pair if vertical_gap < 0.5 * avg_line_height
+//       AND x_overlap > 50% of the smaller region's width.
+// Iterate until no pair qualifies (one merge can enable another).
+export function mergeCloseRegions(regions: Region[]): Region[] {
+  if (regions.length < 2) return regions;
+
+  // Average region height across the page in normalized coords. Using the
+  // mean (not the per-pair pair) keeps the threshold stable across passes.
+  const avgH = regions.reduce((s, r) => s + (r.bbox[3] - r.bbox[1]), 0) / regions.length;
+  const vGapThreshold = 0.5 * avgH;
+
+  let working = regions.slice();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    outer: for (let i = 0; i < working.length; i++) {
+      for (let j = i + 1; j < working.length; j++) {
+        const a = working[i]!;
+        const b = working[j]!;
+        const [ax1, ay1, ax2, ay2] = a.bbox;
+        const [bx1, by1, bx2, by2] = b.bbox;
+
+        // Vertical gap: positive when one region is fully above the other,
+        // negative when they overlap vertically. Negative gaps trivially
+        // satisfy the threshold.
+        const vGap = Math.max(by1 - ay2, ay1 - by2);
+        if (vGap >= vGapThreshold) continue;
+
+        const xOverlap = Math.max(0, Math.min(ax2, bx2) - Math.max(ax1, bx1));
+        const minWidth = Math.min(ax2 - ax1, bx2 - bx1);
+        const xOverlapFrac = minWidth > 0 ? xOverlap / minWidth : 0;
+        if (xOverlapFrac <= 0.5) continue;
+
+        // Order by y_top so concatenation is top-to-bottom.
+        const [first, second] = a.bbox[1] <= b.bbox[1] ? [a, b] : [b, a];
+        const merged: Region = {
+          bbox: [
+            Math.min(ax1, bx1),
+            Math.min(ay1, by1),
+            Math.max(ax2, bx2),
+            Math.max(ay2, by2),
+          ],
+          ocr_text: `${first.ocr_text ?? ''}\n${second.ocr_text ?? ''}`.trim(),
+          type: 'other',
+          source: 'google',
+        };
+        working = [
+          ...working.slice(0, i),
+          merged,
+          ...working.slice(i + 1, j),
+          ...working.slice(j + 1),
+        ];
+        changed = true;
+        break outer;
+      }
+    }
+  }
+  return working;
 }
 
 // ─── Image dimensions ──────────────────────────────────────────────────────
@@ -220,9 +317,13 @@ export async function detectPageWithGoogleVision(
     }],
   };
 
-  // Same content-addressed cache as the Anthropic path. Body shape differs
-  // structurally so SHA256 collisions with Anthropic entries are impossible.
-  const call_hash = await sha256Hex(JSON.stringify(body));
+  // Granularity + merge are post-processing knobs (not sent to Google), but
+  // they DO change what we cache — so include them in the cache key. Body
+  // shape differs from Anthropic's structurally; collisions impossible.
+  const settings = readUserSettings();
+  const granularity = settings.googleVisionGranularity ?? 'paragraphs';
+  const mergeBoxes = settings.googleVisionMergeCloseBoxes ?? false;
+  const call_hash = await sha256Hex(JSON.stringify({ body, granularity, mergeBoxes }));
   const hit = await cacheLookup(call_hash);
   if (hit) {
     await logCall({
@@ -263,7 +364,8 @@ export async function detectPageWithGoogleVision(
     throw new GoogleVisionError(perReqErr.code ?? 0, perReqErr.message);
   }
 
-  const regions = mapVisionResponseToRegions(json, width, height);
+  let regions = mapVisionResponseToRegions(json, width, height, granularity);
+  if (mergeBoxes) regions = mergeCloseRegions(regions);
 
   // Vision charges per call, not per token. Store 0/0 to keep schemas simple;
   // the call log filters on cache_hit for "spent vs saved" so this is consistent.

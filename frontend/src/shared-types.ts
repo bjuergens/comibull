@@ -60,12 +60,20 @@ export type Region = typeof regionSchema.infer;
 export const pageStatusSchema = type("'idle' | 'processing' | 'error'");
 export type PageStatus = typeof pageStatusSchema.infer;
 
+export const googleVisionGranularitySchema = type("'paragraphs' | 'blocks'");
+export type GoogleVisionGranularity = typeof googleVisionGranularitySchema.infer;
+
 // Stored in localStorage. Only account-global preferences belong here;
 // per-browser UI toggles (debugMode, collapsed panels) live in their own keys.
 export const userSettingsSchema = type({
   canEditTextboxes: 'boolean',
   defaultLanguage: sourceLanguageSchema,
   webpQuality: '1 <= number.integer <= 100',
+  // Google-Vision-specific. Optional because they were added after the
+  // initial UserSettings shape — old localStorage entries still parse.
+  // Read sites apply defaults via ?? .
+  'googleVisionGranularity?': googleVisionGranularitySchema,
+  'googleVisionMergeCloseBoxes?': 'boolean',
   '+': 'reject',
 });
 export type UserSettings = typeof userSettingsSchema.infer;
@@ -74,6 +82,8 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   canEditTextboxes: false,
   defaultLanguage: 'fr',
   webpQuality: 50,
+  googleVisionGranularity: 'paragraphs',
+  googleVisionMergeCloseBoxes: false,
 };
 
 export const aiCallTypeSchema = type("'detect' | 'analyze'");
