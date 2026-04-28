@@ -27,11 +27,11 @@ import {
   type SourceLanguage,
   type AiCallType,
 } from './shared-types';
-import { cacheStore, logCall } from './store';
+import { cacheLookup, cacheStore, logCall } from './store';
 import { assertWebpBlob } from './image-conversion';
 import { readApiKey, readModelConfig } from './user-settings';
 import { detectPageWithGoogleVision } from './google-vision';
-import { blobToBase64, fetchWithTimeout, readErrorMessage, sha256Hex, tryCachedResponse } from './api-utils';
+import { blobToBase64, fetchWithTimeout, readErrorMessage, sha256Hex } from './api-utils';
 
 export class AnthropicError extends Error {
   constructor(public status: number, message: string) {
@@ -157,22 +157,22 @@ async function callClaude<S extends Type>(args: CallArgs<S>): Promise<{
   };
 
   // Hash input (minus the API key, which lives in headers) for content-addressed
-  // caching. Schema is part of `body` (input_schema), so a schema change normally
-  // invalidates entries via the hash — `tryCachedResponse` re-validates on hit
-  // as a backstop against a stale payload from before a refactor.
+  // caching. Schema is part of `body` (input_schema), so a schema change flips
+  // the hash and naturally invalidates entries — no separate revalidation needed.
   const call_hash = await sha256Hex(JSON.stringify(body));
-  const cached = await tryCachedResponse(call_hash, args.schema, hit => ({
-    call_type: args.call_type,
-    provider: 'anthropic',
-    model: args.config.model,
-    input_tokens: hit.input_tokens,
-    output_tokens: hit.output_tokens,
-    cache_hit: true,
-    page_id: args.page_id,
-    created_at: new Date().toISOString(),
-  }));
-  if (cached !== null) {
-    return { parsed: cached, tokens: { input: 0, output: 0 }, cache_hit: true };
+  const hit = await cacheLookup(call_hash);
+  if (hit) {
+    await logCall({
+      call_type: args.call_type,
+      provider: 'anthropic',
+      model: args.config.model,
+      input_tokens: hit.input_tokens,
+      output_tokens: hit.output_tokens,
+      cache_hit: true,
+      page_id: args.page_id,
+      created_at: new Date().toISOString(),
+    });
+    return { parsed: hit.response_json as S['infer'], tokens: { input: 0, output: 0 }, cache_hit: true };
   }
 
   const res = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {

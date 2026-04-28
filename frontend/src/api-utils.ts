@@ -3,7 +3,6 @@
 // classes and response parsing.
 
 import { type, type Type } from 'arktype';
-import { cacheLookup, logCall, type CacheEntry, type CallLogEntry } from './store';
 
 // 2 minutes — long enough for vision calls on big pages, short enough that a
 // hung request fails loudly.
@@ -72,25 +71,3 @@ export async function readErrorMessage<S extends Type>(
   }
 }
 
-// Cache-hit handling: lookup, re-validate the stored payload against the
-// current schema, log a cache_hit row, and return the parsed value. Returns
-// null on a miss or a stale entry — caller fetches fresh and overwrites.
-//
-// Re-validation matters because the cache key hashes the request body
-// (including any input_schema), but a refactor of the response shape can
-// still desync from existing entries; we'd rather refetch than serve stale.
-export async function tryCachedResponse<S extends Type>(
-  call_hash: string,
-  schema: S,
-  buildLogEntry: (hit: CacheEntry) => Omit<CallLogEntry, 'id'>,
-): Promise<S['infer'] | null> {
-  const hit = await cacheLookup(call_hash);
-  if (!hit) return null;
-  const revalidated = schema(hit.response_json);
-  if (revalidated instanceof type.errors) {
-    console.warn(`⚠️ stale cache entry for ${call_hash.slice(0, 8)}… re-fetching:`, revalidated.summary);
-    return null;
-  }
-  await logCall(buildLogEntry(hit));
-  return revalidated;
-}

@@ -10,14 +10,13 @@
 import { type } from 'arktype';
 import {
   GOOGLE_VISION_MODEL_ID,
-  regionSchema,
   type GoogleVisionGranularity,
   type Region,
 } from './shared-types';
-import { cacheStore, logCall } from './store';
+import { cacheLookup, cacheStore, logCall } from './store';
 import { assertWebpBlob } from './image-conversion';
 import { readGoogleApiKey, readUserSettings } from './user-settings';
-import { blobToBase64, fetchWithTimeout, readErrorMessage, sha256Hex, tryCachedResponse } from './api-utils';
+import { blobToBase64, fetchWithTimeout, readErrorMessage, sha256Hex } from './api-utils';
 
 export class GoogleVisionError extends Error {
   constructor(public status: number, message: string) {
@@ -275,74 +274,74 @@ export async function detectPageWithGoogleVision(
     }],
   };
 
-  // Granularity + merge are post-processing knobs (not sent to Google), but
-  // they DO change what we cache — so include them in the cache key. Body
-  // shape differs from Anthropic's structurally; collisions impossible.
+  // Cache the raw Vision envelope, not the mapped Region[]. The hash captures
+  // exactly what we send upstream; granularity + mergeBoxes are post-processing
+  // knobs applied on every read, so changing them reuses the cache and a
+  // RegionSchema refactor can't serve stale shapes — we always re-map.
+  const call_hash = await sha256Hex(JSON.stringify(body));
   const settings = readUserSettings();
   const granularity = settings.googleVisionGranularity ?? 'paragraphs';
   const mergeBoxes = settings.googleVisionMergeCloseBoxes ?? false;
-  const call_hash = await sha256Hex(JSON.stringify({ body, granularity, mergeBoxes }));
-  // Cached response is the mapped Region[] (mapping is deterministic and needs
-  // image dimensions we don't want to re-decode). tryCachedResponse re-validates
-  // against the current Region schema so a refactor can't serve stale shapes.
-  const cached = await tryCachedResponse(call_hash, regionSchema.array(), hit => ({
-    call_type: 'detect',
-    provider: 'google',
-    model: GOOGLE_VISION_MODEL_ID,
-    input_tokens: hit.input_tokens,
-    output_tokens: hit.output_tokens,
-    cache_hit: true,
-    page_id,
-    created_at: new Date().toISOString(),
-  }));
-  if (cached !== null) return cached;
+
+  const hit = await cacheLookup(call_hash);
+  let envelope: GoogleVisionAnnotateResponse;
+  if (hit) {
+    envelope = hit.response_json as GoogleVisionAnnotateResponse;
+    // Vision charges per call, not per token. Store 0/0 to keep schemas simple;
+    // the call log filters on cache_hit for "spent vs saved".
+    await logCall({
+      call_type: 'detect',
+      provider: 'google',
+      model: GOOGLE_VISION_MODEL_ID,
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_hit: true,
+      page_id,
+      created_at: new Date().toISOString(),
+    });
+  } else {
+    const url = `https://vision.googleapis.com/v1/images:annotate?key=${encodeURIComponent(apiKey)}`;
+    const res = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }, GoogleVisionError);
+    if (!res.ok) throw new GoogleVisionError(res.status, await readGoogleError(res));
+
+    const parsed = annotateResponseSchema(await res.json());
+    if (parsed instanceof type.errors) {
+      throw new GoogleVisionError(0, `Antwort hat unerwartete Form: ${parsed.summary}`);
+    }
+    // Vision wraps per-request errors inside responses[i].error rather than
+    // returning a non-200. Surface them like an HTTP error.
+    const perReqErr = parsed.responses?.[0]?.error;
+    if (perReqErr?.message) {
+      throw new GoogleVisionError(perReqErr.code ?? 0, perReqErr.message);
+    }
+    envelope = parsed;
+    await cacheStore({
+      call_hash,
+      call_type: 'detect',
+      response_json: envelope,
+      input_tokens: 0,
+      output_tokens: 0,
+      created_at: new Date().toISOString(),
+    });
+    await logCall({
+      call_type: 'detect',
+      provider: 'google',
+      model: GOOGLE_VISION_MODEL_ID,
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_hit: false,
+      page_id,
+      created_at: new Date().toISOString(),
+    });
+  }
 
   const { width, height } = await readImageDimensions(image);
-
-  const url = `https://vision.googleapis.com/v1/images:annotate?key=${encodeURIComponent(apiKey)}`;
-  const res = await fetchWithTimeout(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  }, GoogleVisionError);
-
-  if (!res.ok) throw new GoogleVisionError(res.status, await readGoogleError(res));
-
-  const json = annotateResponseSchema(await res.json());
-  if (json instanceof type.errors) {
-    throw new GoogleVisionError(0, `Antwort hat unerwartete Form: ${json.summary}`);
-  }
-  // Vision wraps per-request errors inside responses[i].error rather than
-  // returning a non-200. Surface them like an HTTP error.
-  const perReqErr = json.responses?.[0]?.error;
-  if (perReqErr?.message) {
-    throw new GoogleVisionError(perReqErr.code ?? 0, perReqErr.message);
-  }
-
-  let regions = mapVisionResponseToRegions(json, width, height, granularity);
+  let regions = mapVisionResponseToRegions(envelope, width, height, granularity);
   if (mergeBoxes) regions = mergeCloseRegions(regions);
-
-  // Vision charges per call, not per token. Store 0/0 to keep schemas simple;
-  // the call log filters on cache_hit for "spent vs saved" so this is consistent.
-  await cacheStore({
-    call_hash,
-    call_type: 'detect',
-    response_json: regions,
-    input_tokens: 0,
-    output_tokens: 0,
-    created_at: new Date().toISOString(),
-  });
-  await logCall({
-    call_type: 'detect',
-    provider: 'google',
-    model: GOOGLE_VISION_MODEL_ID,
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_hit: false,
-    page_id,
-    created_at: new Date().toISOString(),
-  });
-
   return regions;
 }
 
