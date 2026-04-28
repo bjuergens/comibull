@@ -14,10 +14,10 @@ import {
   type GoogleVisionGranularity,
   type Region,
 } from './shared-types';
-import { cacheLookup, cacheStore, logCall } from './store';
+import { cacheStore, logCall } from './store';
 import { assertWebpBlob } from './image-conversion';
 import { readGoogleApiKey, readUserSettings } from './user-settings';
-import { blobToBase64, fetchWithTimeout, sha256Hex } from './api-utils';
+import { blobToBase64, fetchWithTimeout, readErrorMessage, sha256Hex, tryCachedResponse } from './api-utils';
 
 export class GoogleVisionError extends Error {
   constructor(public status: number, message: string) {
@@ -31,22 +31,12 @@ export class MissingGoogleApiKeyError extends Error {
   }
 }
 
-const makeTimeoutError = (msg: string) => new GoogleVisionError(0, msg);
-
 const googleErrorSchema = type({
   'error?': { 'message?': 'string', 'code?': 'number' },
 });
 
-async function readErrorMessage(res: Response): Promise<string> {
-  const fallback = `${res.status} ${res.statusText}`;
-  try {
-    const parsed = googleErrorSchema(await res.json());
-    if (parsed instanceof type.errors) return fallback;
-    return parsed.error?.message ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
+const readGoogleError = (res: Response) =>
+  readErrorMessage(res, googleErrorSchema, p => p.error?.message);
 
 // ─── Vision response schema ───────────────────────────────────────────────
 // Validates only the fields we read. Vision returns a lot more (locale,
@@ -292,27 +282,20 @@ export async function detectPageWithGoogleVision(
   const granularity = settings.googleVisionGranularity ?? 'paragraphs';
   const mergeBoxes = settings.googleVisionMergeCloseBoxes ?? false;
   const call_hash = await sha256Hex(JSON.stringify({ body, granularity, mergeBoxes }));
-  const hit = await cacheLookup(call_hash);
-  if (hit) {
-    // Cached response is the mapped Region[] (mapping is deterministic and
-    // needs image dimensions we don't want to re-decode). Re-validate against
-    // the current Region schema so a refactor can't silently serve stale shapes.
-    const revalidated = regionSchema.array()(hit.response_json);
-    if (!(revalidated instanceof type.errors)) {
-      await logCall({
-        call_type: 'detect',
-        provider: 'google',
-        model: GOOGLE_VISION_MODEL_ID,
-        input_tokens: hit.input_tokens,
-        output_tokens: hit.output_tokens,
-        cache_hit: true,
-        page_id,
-        created_at: new Date().toISOString(),
-      });
-      return revalidated;
-    }
-    console.warn(`⚠️ stale Vision cache entry for ${call_hash.slice(0, 8)}… re-fetching:`, revalidated.summary);
-  }
+  // Cached response is the mapped Region[] (mapping is deterministic and needs
+  // image dimensions we don't want to re-decode). tryCachedResponse re-validates
+  // against the current Region schema so a refactor can't serve stale shapes.
+  const cached = await tryCachedResponse(call_hash, regionSchema.array(), hit => ({
+    call_type: 'detect',
+    provider: 'google',
+    model: GOOGLE_VISION_MODEL_ID,
+    input_tokens: hit.input_tokens,
+    output_tokens: hit.output_tokens,
+    cache_hit: true,
+    page_id,
+    created_at: new Date().toISOString(),
+  }));
+  if (cached !== null) return cached;
 
   const { width, height } = await readImageDimensions(image);
 
@@ -321,9 +304,9 @@ export async function detectPageWithGoogleVision(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  }, makeTimeoutError);
+  }, GoogleVisionError);
 
-  if (!res.ok) throw new GoogleVisionError(res.status, await readErrorMessage(res));
+  if (!res.ok) throw new GoogleVisionError(res.status, await readGoogleError(res));
 
   const json = annotateResponseSchema(await res.json());
   if (json instanceof type.errors) {
@@ -378,8 +361,8 @@ export async function testGoogleApiKey(apiKey: string): Promise<void> {
         features: [{ type: 'LABEL_DETECTION', maxResults: 1 }],
       }],
     }),
-  }, makeTimeoutError);
-  if (!res.ok) throw new GoogleVisionError(res.status, await readErrorMessage(res));
+  }, GoogleVisionError);
+  if (!res.ok) throw new GoogleVisionError(res.status, await readGoogleError(res));
   // A 200 with a per-request error still indicates a bad key/permissions.
   const parsed = annotateResponseSchema(await res.json());
   if (!(parsed instanceof type.errors)) {

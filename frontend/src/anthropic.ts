@@ -27,11 +27,11 @@ import {
   type SourceLanguage,
   type AiCallType,
 } from './shared-types';
-import { cacheLookup, cacheStore, logCall } from './store';
+import { cacheStore, logCall } from './store';
 import { assertWebpBlob } from './image-conversion';
 import { readApiKey, readModelConfig } from './user-settings';
 import { detectPageWithGoogleVision } from './google-vision';
-import { blobToBase64, fetchWithTimeout, sha256Hex } from './api-utils';
+import { blobToBase64, fetchWithTimeout, readErrorMessage, sha256Hex, tryCachedResponse } from './api-utils';
 
 export class AnthropicError extends Error {
   constructor(public status: number, message: string) {
@@ -113,8 +113,6 @@ export const analyzeResponseSchema = type({
 // the JSON as the tool_use input — we don't actually run anything.
 const STRUCTURED_TOOL_NAME = 'submit_result';
 
-const makeTimeoutError = (msg: string) => new AnthropicError(0, msg);
-
 function anthropicHeaders(apiKey: string): Record<string, string> {
   return {
     'Content-Type': 'application/json',
@@ -125,16 +123,8 @@ function anthropicHeaders(apiKey: string): Record<string, string> {
   };
 }
 
-async function readErrorMessage(res: Response): Promise<string> {
-  const fallback = `${res.status} ${res.statusText}`;
-  try {
-    const parsed = anthropicErrorSchema(await res.json());
-    if (parsed instanceof type.errors) return fallback;
-    return parsed.error?.message ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
+const readAnthropicError = (res: Response) =>
+  readErrorMessage(res, anthropicErrorSchema, p => p.error?.message);
 
 async function callClaude<S extends Type>(args: CallArgs<S>): Promise<{
   parsed: S['infer'];
@@ -168,36 +158,30 @@ async function callClaude<S extends Type>(args: CallArgs<S>): Promise<{
 
   // Hash input (minus the API key, which lives in headers) for content-addressed
   // caching. Schema is part of `body` (input_schema), so a schema change normally
-  // invalidates existing entries via the hash — but we still re-validate on hit
-  // so a stale cached payload from before a refactor can't slip through.
+  // invalidates entries via the hash — `tryCachedResponse` re-validates on hit
+  // as a backstop against a stale payload from before a refactor.
   const call_hash = await sha256Hex(JSON.stringify(body));
-  const hit = await cacheLookup(call_hash);
-  if (hit) {
-    const revalidated = args.schema(hit.response_json);
-    if (!(revalidated instanceof type.errors)) {
-      await logCall({
-        call_type: args.call_type,
-        provider: 'anthropic',
-        model: args.config.model,
-        input_tokens: hit.input_tokens,
-        output_tokens: hit.output_tokens,
-        cache_hit: true,
-        page_id: args.page_id,
-        created_at: new Date().toISOString(),
-      });
-      return { parsed: revalidated, tokens: { input: 0, output: 0 }, cache_hit: true };
-    }
-    // Stale cache entry — fall through and re-fetch. cacheStore below overwrites it.
-    console.warn(`⚠️ stale cache entry for ${call_hash.slice(0, 8)}… re-fetching:`, revalidated.summary);
+  const cached = await tryCachedResponse(call_hash, args.schema, hit => ({
+    call_type: args.call_type,
+    provider: 'anthropic',
+    model: args.config.model,
+    input_tokens: hit.input_tokens,
+    output_tokens: hit.output_tokens,
+    cache_hit: true,
+    page_id: args.page_id,
+    created_at: new Date().toISOString(),
+  }));
+  if (cached !== null) {
+    return { parsed: cached, tokens: { input: 0, output: 0 }, cache_hit: true };
   }
 
   const res = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: anthropicHeaders(apiKey),
     body: JSON.stringify(body),
-  }, makeTimeoutError);
+  }, AnthropicError);
 
-  if (!res.ok) throw new AnthropicError(res.status, await readErrorMessage(res));
+  if (!res.ok) throw new AnthropicError(res.status, await readAnthropicError(res));
 
   const json = anthropicEnvelopeSchema(await res.json());
   if (json instanceof type.errors) {
@@ -327,6 +311,6 @@ export async function testApiKey(apiKey: string): Promise<void> {
       max_tokens: 16,
       messages: [{ role: 'user', content: 'reply with the single word OK' }],
     }),
-  }, makeTimeoutError);
-  if (!res.ok) throw new AnthropicError(res.status, await readErrorMessage(res));
+  }, AnthropicError);
+  if (!res.ok) throw new AnthropicError(res.status, await readAnthropicError(res));
 }

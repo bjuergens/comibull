@@ -2,9 +2,15 @@
 // clients. Kept tiny on purpose — provider modules still own their own error
 // classes and response parsing.
 
+import { type, type Type } from 'arktype';
+import { cacheLookup, logCall, type CacheEntry, type CallLogEntry } from './store';
+
 // 2 minutes — long enough for vision calls on big pages, short enough that a
 // hung request fails loudly.
 export const REQUEST_TIMEOUT_MS = 120_000;
+
+// Shape of every provider's HTTP error class: status + message constructor.
+export type HttpErrorClass = new (status: number, message: string) => Error;
 
 export async function sha256Hex(s: string): Promise<string> {
   const buf = new TextEncoder().encode(s);
@@ -27,12 +33,12 @@ export async function blobToBase64(blob: Blob): Promise<string> {
   return btoa(bin);
 }
 
-// fetch() with a hard timeout. Each provider passes its own error factory so
-// the thrown error carries the right class for instanceof checks at callsites.
+// fetch() with a hard timeout. Each provider passes its own error class so
+// the thrown timeout carries the right type for instanceof checks at callsites.
 export async function fetchWithTimeout(
   input: RequestInfo,
   init: RequestInit,
-  makeTimeoutError: (msg: string) => Error,
+  ErrorClass: HttpErrorClass,
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -40,10 +46,51 @@ export async function fetchWithTimeout(
     return await fetch(input, { ...init, signal: controller.signal });
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
-      throw makeTimeoutError(`Anfrage nach ${REQUEST_TIMEOUT_MS / 1000}s abgebrochen (Timeout).`);
+      throw new ErrorClass(0, `Anfrage nach ${REQUEST_TIMEOUT_MS / 1000}s abgebrochen (Timeout).`);
     }
     throw err;
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Pull the error message out of a non-OK Response. Each provider has its own
+// error JSON shape, so callers pass an arktype schema describing it; the
+// fallback "<status> <statusText>" is used if parsing fails.
+export async function readErrorMessage<S extends Type>(
+  res: Response,
+  errorSchema: S,
+  pickMessage: (parsed: S['infer']) => string | undefined,
+): Promise<string> {
+  const fallback = `${res.status} ${res.statusText}`;
+  try {
+    const parsed = errorSchema(await res.json());
+    if (parsed instanceof type.errors) return fallback;
+    return pickMessage(parsed) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+// Cache-hit handling: lookup, re-validate the stored payload against the
+// current schema, log a cache_hit row, and return the parsed value. Returns
+// null on a miss or a stale entry — caller fetches fresh and overwrites.
+//
+// Re-validation matters because the cache key hashes the request body
+// (including any input_schema), but a refactor of the response shape can
+// still desync from existing entries; we'd rather refetch than serve stale.
+export async function tryCachedResponse<S extends Type>(
+  call_hash: string,
+  schema: S,
+  buildLogEntry: (hit: CacheEntry) => Omit<CallLogEntry, 'id'>,
+): Promise<S['infer'] | null> {
+  const hit = await cacheLookup(call_hash);
+  if (!hit) return null;
+  const revalidated = schema(hit.response_json);
+  if (revalidated instanceof type.errors) {
+    console.warn(`⚠️ stale cache entry for ${call_hash.slice(0, 8)}… re-fetching:`, revalidated.summary);
+    return null;
+  }
+  await logCall(buildLogEntry(hit));
+  return revalidated;
 }
