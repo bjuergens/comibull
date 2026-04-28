@@ -77,14 +77,25 @@ the client-only product:
   bundle and shown on the Settings page; that's the closest thing to
   a version probe today.
 
+## Tests
+
+- **PDF upload smoketest.** `pdf-extraction.extractPdfPages()` is
+  unverified by automation — only manual browser testing. Plan: human
+  hand-crafts a tiny test PDF (2–3 pages), checks it into the repo
+  (probably `frontend/src/__tests__/fixtures/`), and we wire a Vitest
+  unit test that feeds it through `extractPdfPages()` and asserts the
+  page count + that each blob is `image/webp`. jsdom doesn't have a
+  canvas; we'll need `vitest-canvas-mock` or to run that test in a
+  real browser (`@vitest/browser`).
+
 ## Maybe later
 
 - Impressum / Datenschutz page (legally required for EU public hosting;
   out of scope until we publish broadly).
 - Bug-report flow (was a backend POST; could become a "Copy diagnostics
   to clipboard" + GitHub-issues link).
-- Archive uploads (CBZ/PDF) — need `jszip` / `pdfjs-dist` in the
-  bundle. Skipped for now.
+- Archive uploads (CBZ/PDF) — PDF landed (1 PDF → 1 comic, see
+  `pdf-extraction.ts`). CBZ still skipped; would need `jszip`.
 - Bundle splitting: Vite warns about >500KB chunks. Mantine is heavy;
   `manualChunks` would help.
 - Retry logic for Anthropic 5xx / 529 (overloaded). Backend had
