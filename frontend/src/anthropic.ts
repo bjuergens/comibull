@@ -13,12 +13,13 @@
 import { type, type Type } from 'arktype';
 import {
   ANALYZE_PROMPT,
-  analyzeResponseSchema,
+  bboxSchema,
+  cefrLevelSchema,
   DEFAULT_AI_CONFIG,
   DEFAULT_SOURCE_LANGUAGE,
   DETECT_PROMPT,
-  detectResponseSchema,
   LANGUAGE_LABELS,
+  regionTypeSchema,
   SYSTEM_PROMPT,
   TARGET_LANGUAGE_NAME,
   type CallTypeConfig,
@@ -30,6 +31,7 @@ import { cacheLookup, cacheStore, logCall } from './store';
 import { assertWebpBlob } from './image-conversion';
 import { readApiKey, readModelConfig } from './user-settings';
 import { detectPageWithGoogleVision } from './google-vision';
+import { blobToBase64, fetchWithTimeout, sha256Hex } from './api-utils';
 
 export class AnthropicError extends Error {
   constructor(public status: number, message: string) {
@@ -41,31 +43,6 @@ export class MissingApiKeyError extends Error {
   constructor() {
     super('Anthropic API key not set — add it in Einstellungen.');
   }
-}
-
-// 2 minutes — the backend's anthropic_timeout_s default. Long enough for
-// vision calls on big pages, short enough that a hung request fails loudly.
-const REQUEST_TIMEOUT_MS = 120_000;
-
-async function sha256Hex(s: string): Promise<string> {
-  const buf = new TextEncoder().encode(s);
-  const hash = await crypto.subtle.digest('SHA-256', buf);
-  return Array.from(new Uint8Array(hash))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-async function blobToBase64(blob: Blob): Promise<string> {
-  const buf = await blob.arrayBuffer();
-  // btoa needs a binary string. Chunked spread avoids the
-  // String.fromCharCode(...big) stack-overflow trap on large images.
-  let bin = '';
-  const bytes = new Uint8Array(buf);
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(bin);
 }
 
 // Validates the /v1/messages envelope. The model-supplied `input` is left
@@ -96,24 +73,47 @@ interface CallArgs<S extends Type> {
   page_id: number | null;
 }
 
+// ─── Anthropic structured-output response schemas ───────────────────────
+// Defined here (not in shared-types) because anthropic.ts is the only consumer:
+// they shape what the model is asked to return and validate what it returns.
+
+export const detectResponseSchema = type({
+  regions: type({
+    bbox: bboxSchema,
+    ocr_text: 'string',
+    type: regionTypeSchema,
+    '+': 'reject',
+  }).array(),
+  '+': 'reject',
+});
+
+// Analyze returns one entry per region with a region_index pointing back at the
+// input order. The rest of each entry matches RegionAnalysis exactly. We re-list
+// the fields rather than .merge()'ing because arktype's merge drops the source
+// type's '+': 'reject' rule, silently allowing extras.
+export const analyzeResponseSchema = type({
+  analyses: type({
+    region_index: 'number.integer >= 0',
+    vocabulary: type({
+      source: 'string',
+      target: 'string',
+      notes: 'string',
+      '+': 'reject',
+    }).array(),
+    grammar_notes: 'string[]',
+    translation: 'string',
+    difficulty: cefrLevelSchema,
+    cultural_notes: 'string',
+    '+': 'reject',
+  }).array(),
+  '+': 'reject',
+});
+
 // All structured-output calls go through one tool name. The model returns
 // the JSON as the tool_use input — we don't actually run anything.
 const STRUCTURED_TOOL_NAME = 'submit_result';
 
-async function fetchWithTimeout(input: RequestInfo, init: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    return await fetch(input, { ...init, signal: controller.signal });
-  } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new AnthropicError(0, `Anfrage nach ${REQUEST_TIMEOUT_MS / 1000}s abgebrochen (Timeout).`);
-    }
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-}
+const makeTimeoutError = (msg: string) => new AnthropicError(0, msg);
 
 function anthropicHeaders(apiKey: string): Record<string, string> {
   return {
@@ -166,32 +166,36 @@ async function callClaude<S extends Type>(args: CallArgs<S>): Promise<{
     tool_choice: { type: 'tool', name: STRUCTURED_TOOL_NAME },
   };
 
-  // Hash input (minus the API key, which lives in headers) for content-addressed caching.
-  // Schema is part of `body` (input_schema), so a schema change naturally invalidates
-  // existing entries — no separate re-validation needed on hit.
+  // Hash input (minus the API key, which lives in headers) for content-addressed
+  // caching. Schema is part of `body` (input_schema), so a schema change normally
+  // invalidates existing entries via the hash — but we still re-validate on hit
+  // so a stale cached payload from before a refactor can't slip through.
   const call_hash = await sha256Hex(JSON.stringify(body));
   const hit = await cacheLookup(call_hash);
   if (hit) {
-    // Log the would-have-been tokens so Settings can show "tokens saved".
-    // cache_hit=true marks this row as savings, not real spend.
-    await logCall({
-      call_type: args.call_type,
-      provider: 'anthropic',
-      model: args.config.model,
-      input_tokens: hit.input_tokens,
-      output_tokens: hit.output_tokens,
-      cache_hit: true,
-      page_id: args.page_id,
-      created_at: new Date().toISOString(),
-    });
-    return { parsed: hit.response_json as S['infer'], tokens: { input: 0, output: 0 }, cache_hit: true };
+    const revalidated = args.schema(hit.response_json);
+    if (!(revalidated instanceof type.errors)) {
+      await logCall({
+        call_type: args.call_type,
+        provider: 'anthropic',
+        model: args.config.model,
+        input_tokens: hit.input_tokens,
+        output_tokens: hit.output_tokens,
+        cache_hit: true,
+        page_id: args.page_id,
+        created_at: new Date().toISOString(),
+      });
+      return { parsed: revalidated, tokens: { input: 0, output: 0 }, cache_hit: true };
+    }
+    // Stale cache entry — fall through and re-fetch. cacheStore below overwrites it.
+    console.warn(`⚠️ stale cache entry for ${call_hash.slice(0, 8)}… re-fetching:`, revalidated.summary);
   }
 
   const res = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: anthropicHeaders(apiKey),
     body: JSON.stringify(body),
-  });
+  }, makeTimeoutError);
 
   if (!res.ok) throw new AnthropicError(res.status, await readErrorMessage(res));
 
@@ -323,6 +327,6 @@ export async function testApiKey(apiKey: string): Promise<void> {
       max_tokens: 16,
       messages: [{ role: 'user', content: 'reply with the single word OK' }],
     }),
-  });
+  }, makeTimeoutError);
   if (!res.ok) throw new AnthropicError(res.status, await readErrorMessage(res));
 }

@@ -10,12 +10,14 @@
 import { type } from 'arktype';
 import {
   GOOGLE_VISION_MODEL_ID,
+  regionSchema,
   type GoogleVisionGranularity,
   type Region,
 } from './shared-types';
 import { cacheLookup, cacheStore, logCall } from './store';
 import { assertWebpBlob } from './image-conversion';
 import { readGoogleApiKey, readUserSettings } from './user-settings';
+import { blobToBase64, fetchWithTimeout, sha256Hex } from './api-utils';
 
 export class GoogleVisionError extends Error {
   constructor(public status: number, message: string) {
@@ -29,41 +31,7 @@ export class MissingGoogleApiKeyError extends Error {
   }
 }
 
-const REQUEST_TIMEOUT_MS = 120_000;
-
-async function sha256Hex(s: string): Promise<string> {
-  const buf = new TextEncoder().encode(s);
-  const hash = await crypto.subtle.digest('SHA-256', buf);
-  return Array.from(new Uint8Array(hash))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-async function blobToBase64(blob: Blob): Promise<string> {
-  const buf = await blob.arrayBuffer();
-  let bin = '';
-  const bytes = new Uint8Array(buf);
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(bin);
-}
-
-async function fetchWithTimeout(input: RequestInfo, init: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    return await fetch(input, { ...init, signal: controller.signal });
-  } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new GoogleVisionError(0, `Anfrage nach ${REQUEST_TIMEOUT_MS / 1000}s abgebrochen (Timeout).`);
-    }
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-}
+const makeTimeoutError = (msg: string) => new GoogleVisionError(0, msg);
 
 const googleErrorSchema = type({
   'error?': { 'message?': 'string', 'code?': 'number' },
@@ -326,20 +294,24 @@ export async function detectPageWithGoogleVision(
   const call_hash = await sha256Hex(JSON.stringify({ body, granularity, mergeBoxes }));
   const hit = await cacheLookup(call_hash);
   if (hit) {
-    await logCall({
-      call_type: 'detect',
-      provider: 'google',
-      model: GOOGLE_VISION_MODEL_ID,
-      input_tokens: hit.input_tokens,
-      output_tokens: hit.output_tokens,
-      cache_hit: true,
-      page_id,
-      created_at: new Date().toISOString(),
-    });
-    // Cached response is already a Region[] — we cache the mapped output, not
-    // the raw Vision envelope, because the mapping is deterministic and the
-    // mapping needs image dimensions which we don't want to re-decode.
-    return hit.response_json as Region[];
+    // Cached response is the mapped Region[] (mapping is deterministic and
+    // needs image dimensions we don't want to re-decode). Re-validate against
+    // the current Region schema so a refactor can't silently serve stale shapes.
+    const revalidated = regionSchema.array()(hit.response_json);
+    if (!(revalidated instanceof type.errors)) {
+      await logCall({
+        call_type: 'detect',
+        provider: 'google',
+        model: GOOGLE_VISION_MODEL_ID,
+        input_tokens: hit.input_tokens,
+        output_tokens: hit.output_tokens,
+        cache_hit: true,
+        page_id,
+        created_at: new Date().toISOString(),
+      });
+      return revalidated;
+    }
+    console.warn(`⚠️ stale Vision cache entry for ${call_hash.slice(0, 8)}… re-fetching:`, revalidated.summary);
   }
 
   const { width, height } = await readImageDimensions(image);
@@ -349,7 +321,7 @@ export async function detectPageWithGoogleVision(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  });
+  }, makeTimeoutError);
 
   if (!res.ok) throw new GoogleVisionError(res.status, await readErrorMessage(res));
 
@@ -406,7 +378,7 @@ export async function testGoogleApiKey(apiKey: string): Promise<void> {
         features: [{ type: 'LABEL_DETECTION', maxResults: 1 }],
       }],
     }),
-  });
+  }, makeTimeoutError);
   if (!res.ok) throw new GoogleVisionError(res.status, await readErrorMessage(res));
   // A 200 with a per-request error still indicates a bad key/permissions.
   const parsed = annotateResponseSchema(await res.json());
