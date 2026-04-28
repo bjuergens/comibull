@@ -19,6 +19,7 @@ import {
 
 const KEYS = {
   apiKey: 'anthropic_api_key',
+  googleApiKey: 'google_api_key',
   settings: 'user_settings',
   modelConfig: 'ai_model_config',
   debugMode: 'debug_mode',
@@ -34,6 +35,18 @@ export function writeApiKey(key: string): void {
 
 export function clearApiKey(): void {
   localStorage.removeItem(KEYS.apiKey);
+}
+
+export function readGoogleApiKey(): string | null {
+  return localStorage.getItem(KEYS.googleApiKey);
+}
+
+export function writeGoogleApiKey(key: string): void {
+  localStorage.setItem(KEYS.googleApiKey, key);
+}
+
+export function clearGoogleApiKey(): void {
+  localStorage.removeItem(KEYS.googleApiKey);
 }
 
 export function readUserSettings(): UserSettings {
@@ -78,7 +91,9 @@ export function writeDebugMode(on: boolean): void {
 
 export function clearAllSettingsExceptApiKey(): void {
   for (const k of Object.values(KEYS)) {
-    if (k === KEYS.apiKey) continue;
+    // Both API keys survive a data wipe — same UX argument: re-pasting them
+    // after every "delete data" is annoying when the wipe is for cache/comics.
+    if (k === KEYS.apiKey || k === KEYS.googleApiKey) continue;
     localStorage.removeItem(k);
   }
 }

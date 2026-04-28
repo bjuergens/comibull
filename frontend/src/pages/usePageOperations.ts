@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { showError } from '../notifications';
 import { analyzeRegions, detectPage, AnthropicError, MissingApiKeyError } from '../anthropic';
+import { GoogleVisionError, MissingGoogleApiKeyError } from '../google-vision';
 import { getComic, getPage, listPages, updatePage } from '../store';
 import type { Bbox, ComicDetail, PageItem, Region } from './comic-detail';
 import { buildComicDetail, isPageAnalyzed, isPageProcessing } from './comic-detail';
@@ -9,6 +10,8 @@ import { markManuallyEdited, replaceRegionAt } from '../shared-types';
 function errMsg(err: unknown, fallback: string): string {
   if (err instanceof MissingApiKeyError) return err.message;
   if (err instanceof AnthropicError) return err.message;
+  if (err instanceof MissingGoogleApiKeyError) return err.message;
+  if (err instanceof GoogleVisionError) return err.message;
   return err instanceof Error ? err.message : fallback;
 }
 
