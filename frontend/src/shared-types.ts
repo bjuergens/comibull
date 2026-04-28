@@ -48,7 +48,7 @@ export type RegionAnalysis = typeof regionAnalysisSchema.infer;
 
 // Provenance. "manual" = user-created; "anthropic"/"google" = produced by the
 // matching detect provider; the "+manual" variants mean auto-produced then
-// user-edited. Closed union so a typo in a producer is a compile-time error.
+// user-edited.
 export const regionSourceSchema = type(
   "'anthropic' | 'google' | 'manual' | 'anthropic+manual' | 'google+manual'",
 );
@@ -202,7 +202,6 @@ export function hasManualEdits(source: RegionSource): boolean {
 
 export function markManuallyEdited(region: Region): Region {
   if (hasManualEdits(region.source)) return region;
-  // Producer sources ('anthropic' | 'google') become their '+manual' variant.
   return { ...region, source: `${region.source}+manual` as RegionSource };
 }
 

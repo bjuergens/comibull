@@ -8,7 +8,6 @@ import { type, type Type } from 'arktype';
 // hung request fails loudly.
 export const REQUEST_TIMEOUT_MS = 120_000;
 
-// Shape of every provider's HTTP error class: status + message constructor.
 export type HttpErrorClass = new (status: number, message: string) => Error;
 
 export async function sha256Hex(s: string): Promise<string> {
@@ -32,8 +31,8 @@ export async function blobToBase64(blob: Blob): Promise<string> {
   return btoa(bin);
 }
 
-// fetch() with a hard timeout. Each provider passes its own error class so
-// the thrown timeout carries the right type for instanceof checks at callsites.
+// Each provider passes its own error class so a timeout throws something
+// callers can catch with instanceof AnthropicError / GoogleVisionError.
 export async function fetchWithTimeout(
   input: RequestInfo,
   init: RequestInit,
@@ -53,9 +52,8 @@ export async function fetchWithTimeout(
   }
 }
 
-// Pull the error message out of a non-OK Response. Each provider has its own
-// error JSON shape, so callers pass an arktype schema describing it; the
-// fallback "<status> <statusText>" is used if parsing fails.
+// Each provider's error JSON has a different shape, so callers pass an
+// arktype schema and a message-pluck callback.
 export async function readErrorMessage<S extends Type>(
   res: Response,
   errorSchema: S,

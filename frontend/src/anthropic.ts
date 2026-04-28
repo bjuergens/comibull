@@ -74,8 +74,7 @@ interface CallArgs<S extends Type> {
 }
 
 // ─── Anthropic structured-output response schemas ───────────────────────
-// Defined here (not in shared-types) because anthropic.ts is the only consumer:
-// they shape what the model is asked to return and validate what it returns.
+// Live here (not in shared-types) because anthropic.ts is the only consumer.
 
 export const detectResponseSchema = type({
   regions: type({
