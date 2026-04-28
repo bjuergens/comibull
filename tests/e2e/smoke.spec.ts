@@ -17,7 +17,7 @@ test('Settings: saving an API key tests it and shows success', async ({ page }) 
 
   await page.goto('/#/settings');
   await page.getByLabel(/API-Schlüssel/i).first().fill('sk-test-123');
-  await page.getByRole('button', { name: /Speichern & Testen/i }).click();
+  await page.getByRole('button', { name: /Speichern & Testen/i }).first().click();
 
   // Success toast from notifications.ts.
   await expect(page.getByText(/API-Schlüssel gespeichert/i)).toBeVisible();
