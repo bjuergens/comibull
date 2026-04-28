@@ -43,6 +43,7 @@ import {
   type AiCallType,
   type AiProvider,
   type CallTypeConfig,
+  DEFAULT_PDF_RENDER_SCALE,
   GOOGLE_VISION_MODEL_ID,
   LANGUAGE_LABELS,
   PROVIDER_LABEL,
@@ -324,6 +325,16 @@ export default function SettingsPage() {
               max={100}
               value={settings.webpQuality}
               onChange={(v) => { if (typeof v === 'number') setSetting('webpQuality', v); }}
+            />
+            <NumberInput
+              label="PDF-Renderauflösung (Skalierung)"
+              description="Skalierung gegenüber der nativen PDF-Größe (72 dpi). 2.0 ≈ 144 dpi. Höher = schärfer, aber größere Dateien und längere Verarbeitung. Standard: 2."
+              min={0.5}
+              max={6}
+              step={0.25}
+              decimalScale={2}
+              value={settings.pdfRenderScale ?? DEFAULT_PDF_RENDER_SCALE}
+              onChange={(v) => { if (typeof v === 'number') setSetting('pdfRenderScale', v); }}
             />
           </Stack>
         </section>

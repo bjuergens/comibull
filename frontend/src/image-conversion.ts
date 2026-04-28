@@ -35,7 +35,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-function canvasToWebp(canvas: HTMLCanvasElement, q: number): Promise<Blob> {
+export function canvasToWebp(canvas: HTMLCanvasElement, q: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (b) => {

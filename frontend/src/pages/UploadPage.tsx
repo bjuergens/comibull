@@ -6,7 +6,8 @@ import { useSettings } from '../SettingsContext';
 import { showError } from '../notifications';
 import { addPages, createComic } from '../store';
 import { toWebp } from '../image-conversion';
-import { LANGUAGE_LABELS, SOURCE_LANGUAGES } from '../shared-types';
+import { extractPdfPages, isPdfFile } from '../pdf-extraction';
+import { DEFAULT_PDF_RENDER_SCALE, LANGUAGE_LABELS, SOURCE_LANGUAGES } from '../shared-types';
 
 export default function UploadPage() {
   const navigate = useNavigate();
@@ -25,12 +26,25 @@ export default function UploadPage() {
   // this upload AND persists as the new default.
   const language = settings.defaultLanguage;
 
+  // PDF flow is "1 PDF -> 1 comic". Mixing a PDF with other files (or
+  // selecting multiple PDFs) doesn't make sense here, so reject it at
+  // selection time.
+  const hasPdf = pageFiles.some(isPdfFile);
+  const mixedSelection = hasPdf && pageFiles.length > 1;
+
   async function handleSubmit() {
-    if (pageFiles.length === 0) return;
+    if (pageFiles.length === 0 || mixedSelection) return;
     setUploading(true);
     try {
-      const comic = await createComic(title.trim() || pageFiles[0]!.name.replace(/\.[^.]+$/, ''), language);
-      const webpFiles = await Promise.all(pageFiles.map(f => toWebp(f, settings.webpQuality)));
+      const first = pageFiles[0]!;
+      const comic = await createComic(title.trim() || first.name.replace(/\.[^.]+$/, ''), language);
+      const webpFiles = hasPdf
+        ? await extractPdfPages(
+            first,
+            settings.pdfRenderScale ?? DEFAULT_PDF_RENDER_SCALE,
+            settings.webpQuality,
+          )
+        : await Promise.all(pageFiles.map(f => toWebp(f, settings.webpQuality)));
       await addPages(comic.id, webpFiles);
       void navigate(`/comics/${comic.id}`);
     } catch (err) {
@@ -63,13 +77,22 @@ export default function UploadPage() {
           <input
             type="file"
             multiple
-            accept="image/png,image/jpeg,image/webp"
+            accept="image/png,image/jpeg,image/webp,application/pdf"
             data-testid="page-file-input"
             onChange={(e) => setPageFiles(Array.from(e.target.files ?? []))}
           />
-          <Text size="xs" c="dimmed" mt="xs">Erlaubt: PNG, JPG, WebP. Alles bleibt auf diesem Gerät.</Text>
-          {pageFiles.length > 0 && (
-            <Text size="sm" mt="xs">{pageFiles.length} Datei(en) ausgewählt</Text>
+          <Text size="xs" c="dimmed" mt="xs">
+            Erlaubt: PNG, JPG, WebP oder eine einzelne PDF (1 PDF = 1 Comic). Alles bleibt auf diesem Gerät.
+          </Text>
+          {pageFiles.length > 0 && !mixedSelection && (
+            <Text size="sm" mt="xs">
+              {hasPdf ? `PDF ausgewählt: ${pageFiles[0]!.name}` : `${pageFiles.length} Datei(en) ausgewählt`}
+            </Text>
+          )}
+          {mixedSelection && (
+            <Text size="sm" mt="xs" c="red">
+              Eine PDF kann nur allein hochgeladen werden — bitte nur eine einzelne PDF auswählen oder ausschließlich Bilder.
+            </Text>
           )}
         </div>
 
@@ -78,7 +101,7 @@ export default function UploadPage() {
             data-testid="upload-submit-btn"
             onClick={() => { void handleSubmit(); }}
             loading={uploading}
-            disabled={pageFiles.length === 0}
+            disabled={pageFiles.length === 0 || mixedSelection}
           >
             Hochladen
           </Button>
