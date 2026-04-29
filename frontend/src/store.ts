@@ -46,9 +46,7 @@ export interface CacheEntry {
 export interface CallLogEntry {
   id?: number;
   call_type: AiCallType;
-  // Optional for forwards compat with rows logged before the multi-provider
-  // refactor. Readers should treat absent as 'anthropic'.
-  provider?: AiProvider;
+  provider: AiProvider;
   model: string;
   input_tokens: number;
   output_tokens: number;
@@ -67,12 +65,13 @@ interface Schema extends DBSchema {
 const DB_NAME = 'comibull';
 // Canonical idb upgrade pattern: each `if (oldVersion < N)` block is the step
 // that brought the schema to version N. New users hit every block; existing
-// users only the new ones. Prototype rule: if a step needs to change the
-// shape of existing data, just `clear()` the affected store — don't write
-// data-migration code. The cache regenerates and comics are cheap to
-// re-upload.
+// users only the new ones. v5 collapses earlier wipe-on-bump churn into the
+// baseline; subsequent steps are real migrations.
+//
+// Prototype rule: if a step changes the shape of existing data, `clear()`
+// the affected store — don't write data-migration code.
 //   https://github.com/jakearchibald/idb#opendb
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 const CALL_LOG_MAX = 500;
 
 let dbPromise: Promise<IDBPDatabase<Schema>> | null = null;
@@ -80,12 +79,16 @@ let dbPromise: Promise<IDBPDatabase<Schema>> | null = null;
 export function db(): Promise<IDBPDatabase<Schema>> {
   if (dbPromise === null) {
     dbPromise = openDB<Schema>(DB_NAME, DB_VERSION, {
-      upgrade(db, oldVersion) {
+      upgrade(db, oldVersion, _newVersion, tx) {
         if (oldVersion < 5) {
           db.createObjectStore('comics', { keyPath: 'id' });
           db.createObjectStore('pages', { keyPath: 'id' });
           db.createObjectStore('aiCache', { keyPath: 'call_hash' });
           db.createObjectStore('aiCallLog', { keyPath: 'id', autoIncrement: true });
+        }
+        if (oldVersion < 6) {
+          // provider became required; old rows lacked it.
+          void tx.objectStore('aiCallLog').clear();
         }
       },
     });

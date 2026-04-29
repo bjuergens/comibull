@@ -460,7 +460,7 @@ export default function SettingsPage() {
                       {entry.call_type}
                       {entry.cache_hit && <Badge size="xs" color="teal" variant="light" ml={4}>cache</Badge>}
                     </Table.Td>
-                    <Table.Td>{entry.provider ?? 'anthropic'}</Table.Td>
+                    <Table.Td>{entry.provider}</Table.Td>
                     <Table.Td>{entry.model}</Table.Td>
                     <Table.Td>{entry.input_tokens}</Table.Td>
                     <Table.Td>{entry.output_tokens}</Table.Td>
