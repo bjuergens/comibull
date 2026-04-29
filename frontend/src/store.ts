@@ -65,45 +65,32 @@ interface Schema extends DBSchema {
 }
 
 const DB_NAME = 'comibull';
-// Aggressive prototype migration: bumping this nukes every store and starts
-// fresh. Acceptable because the only data here is uploaded comics and an
-// AI-response cache — no user accounts, no anything irreplaceable. The API
-// key lives in localStorage, so it survives.
+// Canonical idb upgrade pattern: each `if (oldVersion < N)` block is the step
+// that brought the schema to version N. New users hit every block; existing
+// users only the new ones. Prototype rule: if a step needs to change the
+// shape of existing data, just `clear()` the affected store — don't write
+// data-migration code. The cache regenerates and comics are cheap to
+// re-upload.
+//   https://github.com/jakearchibald/idb#opendb
 const DB_VERSION = 5;
 const CALL_LOG_MAX = 500;
 
 let dbPromise: Promise<IDBPDatabase<Schema>> | null = null;
 
-// Set during the upgrade callback when we wipe data; consumed once by App so
-// the user gets a toast on the boot that follows a schema bump.
-let pendingMigrationNotice: { oldVersion: number; newVersion: number } | null = null;
-let migrationNoticeConsumed = false;
-
 export function db(): Promise<IDBPDatabase<Schema>> {
   if (dbPromise === null) {
     dbPromise = openDB<Schema>(DB_NAME, DB_VERSION, {
       upgrade(db, oldVersion) {
-        if (oldVersion > 0) {
-          pendingMigrationNotice = { oldVersion, newVersion: DB_VERSION };
-          console.warn(`⚠️ comibull: schema upgrade from v${oldVersion} to v${DB_VERSION} — wiping IndexedDB.`);
-          for (const name of Array.from(db.objectStoreNames)) {
-            db.deleteObjectStore(name);
-          }
+        if (oldVersion < 5) {
+          db.createObjectStore('comics', { keyPath: 'id' });
+          db.createObjectStore('pages', { keyPath: 'id' });
+          db.createObjectStore('aiCache', { keyPath: 'call_hash' });
+          db.createObjectStore('aiCallLog', { keyPath: 'id', autoIncrement: true });
         }
-        db.createObjectStore('comics', { keyPath: 'id' });
-        db.createObjectStore('pages', { keyPath: 'id' });
-        db.createObjectStore('aiCache', { keyPath: 'call_hash' });
-        db.createObjectStore('aiCallLog', { keyPath: 'id', autoIncrement: true });
       },
     });
   }
   return dbPromise;
-}
-
-export function consumeMigrationNotice(): { oldVersion: number; newVersion: number } | null {
-  if (migrationNoticeConsumed) return null;
-  migrationNoticeConsumed = true;
-  return pendingMigrationNotice;
 }
 
 // ─── IDs ────────────────────────────────────────────────────────────────

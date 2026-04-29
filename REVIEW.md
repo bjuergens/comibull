@@ -22,7 +22,9 @@ Red flags from Ousterhout, tailored to this codebase.
 ## what to flag
 
 * was a pragmatic approach used instead of a "correct" or "official" one?
-* were pre-existing failures or issues skipped? 
+* were pre-existing failures or issues skipped?
+* **complex IndexedDB migrations** — upgrade steps that transform existing rows, branch on multiple `oldVersion` ranges, or reshape data. We're a prototype; if a store's shape changes, just `clear()` the store in the upgrade step. The cache regenerates and comics re-upload.
+* **backwards-compatibility code** — optional fields "for forwards compat with old rows", readers that handle absent properties, version sniffing, dual-shape parsers, legacy code paths kept "just in case". Prototype stage means: change the type, wipe the affected store, move on. Don't pay permanent complexity to read data that no longer exists in any active browser.
 
 ## after review
 

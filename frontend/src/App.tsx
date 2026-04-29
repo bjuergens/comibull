@@ -9,24 +9,14 @@ import ComicEditPage from './pages/ComicEditPage';
 import UploadPage from './pages/UploadPage';
 import SettingsPage from './pages/SettingsPage';
 import NotFoundPage from './pages/NotFoundPage';
-import { consumeMigrationNotice, db } from './store';
-import { showWarning } from './notifications';
+import { db } from './store';
 import './app.css';
 
 export default function App() {
-  // Boot the IndexedDB connection so the upgrade callback fires, then surface
-  // a toast if it wiped data. consumeMigrationNotice is one-shot — safe under
-  // StrictMode's double-mount.
+  // Boot the IndexedDB connection so the upgrade callback fires before any
+  // page tries to read.
   useEffect(() => {
-    void db().then(() => {
-      const m = consumeMigrationNotice();
-      if (m) {
-        showWarning(
-          'Datenbank zurückgesetzt',
-          `Schema von v${m.oldVersion} auf v${m.newVersion} aktualisiert — alle Comics und der KI-Cache wurden gelöscht. Der API-Schlüssel bleibt erhalten.`,
-        );
-      }
-    });
+    void db();
   }, []);
 
   return (
