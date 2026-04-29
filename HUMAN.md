@@ -53,6 +53,18 @@ then answer: what was changed on this branch and why
 
 und manuell den diff durchlesen/überfliegen
 
+## review from tests
+
+ggf in planning mode?
+
+```
+look at unit tests, that target edge cases. each of these tests is a smell for deviation from our "fail fast" design principle. I want to get rid of the complexity, where these edge cases even arrived from, so we want to look at the source for these edgecases and the source's source. The biggest wins are the refactorings that simplify many parts of the system, so while we start our search with test edge cases, all parts of the system are valid targets for restructuring, even the ui, the requirements and the functional requirements. 
+
+for each of these unit tests, trace a path thru the application, where this can happen. mark every place, where we could tighten the flow/branches/data. Where could we simplify requirements to define the edge cases away?
+
+summarize the findings. I will decide which findings we will act upon
+```
+
 ## tests are red flags
 
 siehe auch "define errors out of existence"
