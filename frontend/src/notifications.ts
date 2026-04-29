@@ -12,6 +12,10 @@ export function showSuccess(title: string, message: string) {
   notifications.show({ color: 'teal', title, message, autoClose: 5000 });
 }
 
+export function showInfo(title: string, message: string) {
+  notifications.show({ color: 'blue', title, message, autoClose: 6000 });
+}
+
 export function showCatastrophic(message: string) {
   notifications.show({
     color: 'red',

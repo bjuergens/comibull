@@ -5,7 +5,7 @@
 //   aiCache:     CacheEntry keyed by call_hash (content-addressed responses)
 //   aiCallLog:   CallLogEntry keyed by auto-id — ring buffer trimmed in code
 
-import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import { openDB, type DBSchema, type IDBPDatabase, type IDBPTransaction, type StoreNames } from 'idb';
 import type {
   AiCallType,
   AiProvider,
@@ -65,42 +65,121 @@ interface Schema extends DBSchema {
 }
 
 const DB_NAME = 'comibull';
-// Aggressive prototype migration: bumping this nukes every store and starts
-// fresh. Acceptable because the only data here is uploaded comics and an
-// AI-response cache — no user accounts, no anything irreplaceable. The API
-// key lives in localStorage, so it survives.
-const DB_VERSION = 5;
 const CALL_LOG_MAX = 500;
+
+// ─── Schema upgrades ────────────────────────────────────────────────────
+//
+// To bump the schema:
+//   1. Add an entry to `migrations` keyed by the new target version.
+//      - `incremental` preserves existing data. Use for additive changes
+//        (new store, new index, nullable field).
+//      - `wipe` drops every store and recreates the baseline. Use when the
+//        change is messy enough that a real migration isn't worth writing.
+//   2. Bump DB_VERSION to that key.
+//   3. Extend the upgrade test in __tests__/store-upgrade.test.ts.
+//
+// Callers always see the current schema. Do NOT add backwards-compat shims
+// (`if (row.oldField) ...`) in business code — handle it in the migration
+// or wipe.
+//
+// Databases older than BASELINE_VERSION always wipe; we don't carry old
+// migration paths forward.
+
+type UpgradeTx = IDBPTransaction<Schema, StoreNames<Schema>[], 'versionchange'>;
+
+type Migration =
+  | { kind: 'incremental'; apply: (db: IDBPDatabase<Schema>, tx: UpgradeTx) => void }
+  | { kind: 'wipe'; reason: string };
+
+const BASELINE_VERSION = 5;
+const DB_VERSION = 5;
+
+const migrations: Record<number, Migration> = {
+  // Future bumps go here, e.g.:
+  //   6: { kind: 'incremental', apply: (db) => { db.createObjectStore('foo', { keyPath: 'id' }); } },
+  //   7: { kind: 'wipe', reason: 'pages.regions reshape' },
+};
+
+function createBaseline(db: IDBPDatabase<Schema>): void {
+  db.createObjectStore('comics', { keyPath: 'id' });
+  db.createObjectStore('pages', { keyPath: 'id' });
+  db.createObjectStore('aiCache', { keyPath: 'call_hash' });
+  db.createObjectStore('aiCallLog', { keyPath: 'id', autoIncrement: true });
+}
+
+function wipeAllStores(db: IDBPDatabase<Schema>): void {
+  for (const name of Array.from(db.objectStoreNames)) {
+    db.deleteObjectStore(name);
+  }
+}
 
 let dbPromise: Promise<IDBPDatabase<Schema>> | null = null;
 
-// Set during the upgrade callback when we wipe data; consumed once by App so
-// the user gets a toast on the boot that follows a schema bump.
-let pendingMigrationNotice: { oldVersion: number; newVersion: number } | null = null;
+export interface MigrationNotice {
+  oldVersion: number;
+  newVersion: number;
+  wiped: boolean;
+}
+
+let pendingMigrationNotice: MigrationNotice | null = null;
 let migrationNoticeConsumed = false;
+
+export function runUpgrade(
+  d: IDBPDatabase<Schema>,
+  oldVersion: number,
+  newVersion: number,
+  tx: UpgradeTx,
+): void {
+  if (oldVersion === 0) {
+    createBaseline(d);
+    return;
+  }
+  let wiped = false;
+  if (oldVersion < BASELINE_VERSION) {
+    console.warn(`⚠️ comibull: pre-baseline schema v${oldVersion} → wiping IndexedDB.`);
+    wipeAllStores(d);
+    createBaseline(d);
+    wiped = true;
+  }
+  for (let v = Math.max(oldVersion, BASELINE_VERSION) + 1; v <= newVersion; v++) {
+    const m = migrations[v];
+    if (!m) throw new Error(`no migration registered for v${v}`);
+    if (m.kind === 'wipe') {
+      console.warn(`⚠️ comibull: v${v} wipe (${m.reason}).`);
+      wipeAllStores(d);
+      createBaseline(d);
+      wiped = true;
+    } else {
+      m.apply(d, tx);
+    }
+  }
+  pendingMigrationNotice = { oldVersion, newVersion, wiped };
+}
 
 export function db(): Promise<IDBPDatabase<Schema>> {
   if (dbPromise === null) {
     dbPromise = openDB<Schema>(DB_NAME, DB_VERSION, {
-      upgrade(db, oldVersion) {
-        if (oldVersion > 0) {
-          pendingMigrationNotice = { oldVersion, newVersion: DB_VERSION };
-          console.warn(`⚠️ comibull: schema upgrade from v${oldVersion} to v${DB_VERSION} — wiping IndexedDB.`);
-          for (const name of Array.from(db.objectStoreNames)) {
-            db.deleteObjectStore(name);
-          }
-        }
-        db.createObjectStore('comics', { keyPath: 'id' });
-        db.createObjectStore('pages', { keyPath: 'id' });
-        db.createObjectStore('aiCache', { keyPath: 'call_hash' });
-        db.createObjectStore('aiCallLog', { keyPath: 'id', autoIncrement: true });
+      upgrade(d, oldVersion, newVersion, tx) {
+        runUpgrade(d, oldVersion, newVersion ?? DB_VERSION, tx);
       },
     });
   }
   return dbPromise;
 }
 
-export function consumeMigrationNotice(): { oldVersion: number; newVersion: number } | null {
+export const __DB_NAME = DB_NAME;
+export const __DB_VERSION = DB_VERSION;
+export const __BASELINE_VERSION = BASELINE_VERSION;
+
+// Test-only: register a migration; returns a cleanup that removes it.
+export function __registerMigrationForTest(version: number, m: Migration): () => void {
+  migrations[version] = m;
+  return () => {
+    delete migrations[version];
+  };
+}
+
+export function consumeMigrationNotice(): MigrationNotice | null {
   if (migrationNoticeConsumed) return null;
   migrationNoticeConsumed = true;
   return pendingMigrationNotice;

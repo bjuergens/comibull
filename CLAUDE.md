@@ -51,6 +51,7 @@ Use consistently in code, commits, and logging.
 - Content-addressed AI cache in IndexedDB: identical input → same cached response, no re-spend.
 - No auth, no sessions, no accounts. Any user of the browser profile is the user.
 - Debug mode is a single localStorage toggle in Settings.
+- DB schema upgrades go through a per-version migration registry in `frontend/src/store.ts`. Callers only see the current schema — no backwards-compat shims.
 
 ## Code Style
 

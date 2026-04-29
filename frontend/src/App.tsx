@@ -10,7 +10,7 @@ import UploadPage from './pages/UploadPage';
 import SettingsPage from './pages/SettingsPage';
 import NotFoundPage from './pages/NotFoundPage';
 import { consumeMigrationNotice, db } from './store';
-import { showWarning } from './notifications';
+import { showInfo, showWarning } from './notifications';
 import './app.css';
 
 export default function App() {
@@ -21,10 +21,17 @@ export default function App() {
     void db().then(() => {
       const m = consumeMigrationNotice();
       if (m) {
-        showWarning(
-          'Datenbank zurückgesetzt',
-          `Schema von v${m.oldVersion} auf v${m.newVersion} aktualisiert — alle Comics und der KI-Cache wurden gelöscht. Der API-Schlüssel bleibt erhalten.`,
-        );
+        if (m.wiped) {
+          showWarning(
+            'Datenbank zurückgesetzt',
+            `Schema von v${m.oldVersion} auf v${m.newVersion} aktualisiert — alle Comics und der KI-Cache wurden gelöscht. Der API-Schlüssel bleibt erhalten.`,
+          );
+        } else {
+          showInfo(
+            'Datenbank aktualisiert',
+            `Schema von v${m.oldVersion} auf v${m.newVersion} aktualisiert. Daten bleiben erhalten.`,
+          );
+        }
       }
     });
   }, []);
