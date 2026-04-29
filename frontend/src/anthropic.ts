@@ -122,8 +122,9 @@ function anthropicHeaders(apiKey: string): Record<string, string> {
   };
 }
 
-const readAnthropicError = (res: Response) =>
-  readErrorMessage(res, anthropicErrorSchema, p => p.error?.message);
+function readAnthropicError(res: Response): Promise<string> {
+  return readErrorMessage(res, anthropicErrorSchema, p => p.error?.message);
+}
 
 async function callClaude<S extends Type>(args: CallArgs<S>): Promise<{
   parsed: S['infer'];

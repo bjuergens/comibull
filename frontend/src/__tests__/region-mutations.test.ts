@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { type } from 'arktype';
 import { replaceRegionAt, type Region, type RegionAnalysis } from '../pages/comic-detail';
+import { regionSchema, regionSourceSchema } from '../shared-types';
 
 const baseAnalysis: RegionAnalysis = {
   vocabulary: [],
@@ -42,5 +44,26 @@ describe('replaceRegionAt', () => {
     const regions = [region('bubble+manual')];
     const result = replaceRegionAt(regions, 0, { ocr_text: 'x' });
     expect(result[0].source).toBe('bubble+manual');
+  });
+});
+
+describe('regionSourceSchema', () => {
+  it.each(['anthropic', 'google', 'manual', 'anthropic+manual', 'google+manual'])(
+    'accepts %s',
+    s => {
+      expect(regionSourceSchema(s)).toBe(s);
+    },
+  );
+
+  it.each(['', 'bubble', 'manual+anthropic', 'GOOGLE', 'manual+manual'])(
+    'rejects %s',
+    s => {
+      expect(regionSourceSchema(s)).toBeInstanceOf(type.errors);
+    },
+  );
+
+  it('regionSchema rejects a region with an invalid source', () => {
+    const bad = { bbox: [0, 0, 0.1, 0.1], source: 'unknown-provider' };
+    expect(regionSchema(bad)).toBeInstanceOf(type.errors);
   });
 });

@@ -34,8 +34,9 @@ const googleErrorSchema = type({
   'error?': { 'message?': 'string', 'code?': 'number' },
 });
 
-const readGoogleError = (res: Response) =>
-  readErrorMessage(res, googleErrorSchema, p => p.error?.message);
+function readGoogleError(res: Response): Promise<string> {
+  return readErrorMessage(res, googleErrorSchema, p => p.error?.message);
+}
 
 // ─── Vision response schema ───────────────────────────────────────────────
 // Validates only the fields we read. Vision returns a lot more (locale,
@@ -286,7 +287,11 @@ export async function detectPageWithGoogleVision(
   const hit = await cacheLookup(call_hash);
   let envelope: GoogleVisionAnnotateResponse;
   if (hit) {
-    envelope = hit.response_json as GoogleVisionAnnotateResponse;
+    const parsed = annotateResponseSchema(hit.response_json);
+    if (parsed instanceof type.errors) {
+      throw new GoogleVisionError(0, `Cache row ${call_hash.slice(0, 8)}… violates schema: ${parsed.summary}`);
+    }
+    envelope = parsed;
     // Vision charges per call, not per token. Store 0/0 to keep schemas simple;
     // the call log filters on cache_hit for "spent vs saved".
     await logCall({
@@ -364,10 +369,11 @@ export async function testGoogleApiKey(apiKey: string): Promise<void> {
   if (!res.ok) throw new GoogleVisionError(res.status, await readGoogleError(res));
   // A 200 with a per-request error still indicates a bad key/permissions.
   const parsed = annotateResponseSchema(await res.json());
-  if (!(parsed instanceof type.errors)) {
-    const perReqErr = parsed.responses?.[0]?.error;
-    if (perReqErr?.message) {
-      throw new GoogleVisionError(perReqErr.code ?? 0, perReqErr.message);
-    }
+  if (parsed instanceof type.errors) {
+    throw new GoogleVisionError(0, `Antwort hat unerwartete Form: ${parsed.summary}`);
+  }
+  const perReqErr = parsed.responses?.[0]?.error;
+  if (perReqErr?.message) {
+    throw new GoogleVisionError(perReqErr.code ?? 0, perReqErr.message);
   }
 }
