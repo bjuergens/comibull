@@ -69,7 +69,7 @@ const DB_NAME = 'comibull';
 // fresh. Acceptable because the only data here is uploaded comics and an
 // AI-response cache — no user accounts, no anything irreplaceable. The API
 // key lives in localStorage, so it survives.
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const CALL_LOG_MAX = 500;
 
 let dbPromise: Promise<IDBPDatabase<Schema>> | null = null;

@@ -288,12 +288,13 @@ describe('detectPageWithGoogleVision', () => {
     }));
   });
 
-  it('cache hit: skips the API and logs as savings', async () => {
-    const cached = [{ bbox: [0, 0, 1, 1] as [number, number, number, number], ocr_text: 'cached', type: 'other' as const, source: 'google' }];
+  it('cache hit: skips the API, re-maps the cached envelope, logs as savings', async () => {
+    // Cache stores the raw Vision envelope; the mapping (and any RegionSchema
+    // refactor) is re-applied on every read.
     mocks.cacheLookup.mockResolvedValue({
       call_hash: 'h',
       call_type: 'detect',
-      response_json: cached,
+      response_json: VISION_RESPONSE,
       input_tokens: 0,
       output_tokens: 0,
       created_at: '2026-04-24T00:00:00Z',
@@ -303,7 +304,8 @@ describe('detectPageWithGoogleVision', () => {
 
     expect(globalThis.fetch).not.toHaveBeenCalled();
     expect(mocks.cacheStore).not.toHaveBeenCalled();
-    expect(regions).toEqual(cached);
+    expect(regions).toHaveLength(1);
+    expect(regions[0]?.source).toBe('google');
     expect(mocks.logCall).toHaveBeenCalledWith(expect.objectContaining({
       provider: 'google',
       cache_hit: true,

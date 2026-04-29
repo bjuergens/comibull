@@ -46,13 +46,19 @@ export const regionAnalysisSchema = type({
 });
 export type RegionAnalysis = typeof regionAnalysisSchema.infer;
 
+// Provenance. "manual" = user-created; "anthropic"/"google" = produced by the
+// matching detect provider; the "+manual" variants mean auto-produced then
+// user-edited.
+export const regionSourceSchema = type(
+  "'anthropic' | 'google' | 'manual' | 'anthropic+manual' | 'google+manual'",
+);
+export type RegionSource = typeof regionSourceSchema.infer;
+
 export const regionSchema = type({
   bbox: bboxSchema,
   'type?': regionTypeSchema,
   'ocr_text?': 'string',
-  // Provenance: "anthropic" = produced by detect(); "manual" = user added or edited;
-  // combinations like "anthropic+manual" mean auto-produced then user-edited.
-  source: 'string',
+  source: regionSourceSchema,
   'analysis?': regionAnalysisSchema,
 });
 export type Region = typeof regionSchema.infer;
@@ -188,47 +194,15 @@ ${regionsJson}
 
 Return one analysis entry per region, in the same order. Use region_index starting from 0.`;
 
-// ─── Anthropic structured-output schemas ─────────────────────────────────
-// Defined once with arktype, then handed to Anthropic as JSON Schema (via
-// .toJsonSchema()) AND used to validate the response. No drift possible.
-
-export const detectResponseSchema = type({
-  regions: type({
-    bbox: bboxSchema,
-    ocr_text: 'string',
-    type: regionTypeSchema,
-    '+': 'reject',
-  }).array(),
-  '+': 'reject',
-});
-
-// Analyze returns one entry per region with a region_index pointing back at the
-// input order. The rest of each entry matches RegionAnalysis exactly. We re-list
-// the fields rather than .merge()'ing because arktype's merge drops the source
-// type's '+': 'reject' rule, silently allowing extras.
-export const analyzeResponseSchema = type({
-  analyses: type({
-    region_index: 'number.integer >= 0',
-    vocabulary: type({
-      source: 'string',
-      target: 'string',
-      notes: 'string',
-      '+': 'reject',
-    }).array(),
-    grammar_notes: 'string[]',
-    translation: 'string',
-    difficulty: cefrLevelSchema,
-    cultural_notes: 'string',
-    '+': 'reject',
-  }).array(),
-  '+': 'reject',
-});
-
 // Helper functions ─────────────────────────────────────────────────────────
 
+export function hasManualEdits(source: RegionSource): boolean {
+  return source.includes('manual');
+}
+
 export function markManuallyEdited(region: Region): Region {
-  if (region.source.includes('manual')) return region;
-  return { ...region, source: `${region.source}+manual` };
+  if (hasManualEdits(region.source)) return region;
+  return { ...region, source: `${region.source}+manual` as RegionSource };
 }
 
 // Any manual edit invalidates existing analysis.
